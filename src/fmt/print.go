@@ -74,6 +74,7 @@ type GoStringer interface {
 // Use simple []byte instead of bytes.Buffer to avoid large dependency.
 type buffer []byte
 
+// 使用* append之后 指针不变，指针指向的值变了
 func (b *buffer) write(p []byte) {
 	*b = append(*b, p...)
 }

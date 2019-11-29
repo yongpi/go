@@ -4,7 +4,7 @@
 
 /*
 	Package unsafe contains operations that step around the type safety of Go programs.
-
+	绕开了go语言的安全机制
 	Packages that import unsafe may be non-portable and are not protected by the
 	Go 1 compatibility guidelines.
 */
@@ -12,11 +12,14 @@ package unsafe
 
 // ArbitraryType is here for the purposes of documentation only and is not actually
 // part of the unsafe package. It represents the type of an arbitrary Go expression.
+// ArbitraryType(任意类型) 只是起到文档作用，并不真正是unsafe包的一部分，只是表示go语言任意类型
 type ArbitraryType int
 
 // Pointer represents a pointer to an arbitrary type. There are four special operations
 // available for type Pointer that are not available for other types:
+// 任意类型的指针都能转换成Pointer类型
 //	- A pointer value of any type can be converted to a Pointer.
+// Pointer 类型可以转换成任意类型的指针
 //	- A Pointer can be converted to a pointer value of any type.
 //	- A uintptr can be converted to a Pointer.
 //	- A Pointer can be converted to a uintptr.
@@ -32,7 +35,7 @@ type ArbitraryType int
 // but silence from "go vet" is not a guarantee that the code is valid.
 //
 // (1) Conversion of a *T1 to Pointer to *T2.
-//
+// T2不大于T1，并且共享相同的内存结构
 // Provided that T2 is no larger than T1 and that the two share an equivalent
 // memory layout, this conversion allows reinterpreting data of one type as
 // data of another type. An example is the implementation of
@@ -41,7 +44,10 @@ type ArbitraryType int
 //	func Float64bits(f float64) uint64 {
 //		return *(*uint64)(unsafe.Pointer(&f))
 //	}
-//
+// 从Pointer转成uintptr，不要从uintptr转回Pointer
+// Pointer转成uintptr,只是转成一个整型，即使整型的值代表的是之前某个Object的内存地址，
+// 但是当gc回收object，转成的整型值是不会改变的，这个时候再转回Pointer使用就坏事了
+// 但是，但是，永远有个但是，下面的模式就行哟
 // (2) Conversion of a Pointer to a uintptr (but not back to Pointer).
 //
 // Converting a Pointer to a uintptr produces the memory address of the value
@@ -59,7 +65,7 @@ type ArbitraryType int
 //
 // The remaining patterns enumerate the only valid conversions
 // from uintptr to Pointer.
-//
+// 上面说的下面的但是来了，运用算术的高级处理
 // (3) Conversion of a Pointer to a uintptr and back, with arithmetic.
 //
 // If p points into an allocated object, it can be advanced through the object
@@ -79,7 +85,7 @@ type ArbitraryType int
 // It is valid both to add and to subtract offsets from a pointer in this way.
 // It is also valid to use &^ to round pointers, usually for alignment.
 // In all cases, the result must continue to point into the original allocated object.
-//
+// 不能超出原始分配
 // Unlike in C, it is not valid to advance a pointer just beyond the end of
 // its original allocation:
 //
@@ -90,7 +96,7 @@ type ArbitraryType int
 //	// INVALID: end points outside allocated space.
 //	b := make([]byte, n)
 //	end = unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) + uintptr(n))
-//
+// 转换只能发生在一个表达式中，不能把 uintptr存在一个变量里
 // Note that both conversions must appear in the same expression, with only
 // the intervening arithmetic between them:
 //
@@ -98,13 +104,13 @@ type ArbitraryType int
 //	// before conversion back to Pointer.
 //	u := uintptr(p)
 //	p = unsafe.Pointer(u + offset)
-//
+// 指针必须指向一个已分配内存的对象，不能为nil
 // Note that the pointer must point into an allocated object, so it may not be nil.
 //
 //	// INVALID: conversion of nil pointer
 //	u := unsafe.Pointer(nil)
 //	p := unsafe.Pointer(uintptr(u) + offset)
-//
+// Pointer转成uintptr可以发生在syscall.Syscall，并且在同一个表达式中
 // (4) Conversion of a Pointer to a uintptr when calling syscall.Syscall.
 //
 // The Syscall functions in package syscall pass their uintptr arguments directly
@@ -131,7 +137,7 @@ type ArbitraryType int
 //	// before implicit conversion back to Pointer during system call.
 //	u := uintptr(unsafe.Pointer(p))
 //	syscall.Syscall(SYS_READ, uintptr(fd), u, uintptr(n))
-//
+// 可以把reflect.Value.Pointer or reflect.Value.UnsafeAddr的结果同一个表达式里转成Pointer
 // (5) Conversion of the result of reflect.Value.Pointer or reflect.Value.UnsafeAddr
 // from uintptr to Pointer.
 //
