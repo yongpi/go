@@ -30,7 +30,7 @@ const (
 // ../internal/reflectlite/type.go:/^type.rtype.
 type _type struct {
 	size       uintptr
-	ptrdata    uintptr // size of memory prefix holding all pointers
+	ptrdata    uintptr // size of memory prefix holding all pointers 包含所有指针的内存前缀的大小
 	hash       uint32
 	tflag      tflag
 	align      uint8
@@ -371,7 +371,7 @@ type maptype struct {
 	hasher     func(unsafe.Pointer, uintptr) uintptr
 	keysize    uint8  // size of key slot
 	elemsize   uint8  // size of elem slot
-	bucketsize uint16 // size of bucket
+	bucketsize uint16 // size of bucket 一个 bucket 的大小
 	flags      uint32
 }
 

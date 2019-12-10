@@ -39,10 +39,12 @@ type Type interface {
 
 	// Align returns the alignment in bytes of a value of
 	// this type when allocated in memory.
+	// type 内存填充
 	Align() int
 
 	// FieldAlign returns the alignment in bytes of a value of
 	// this type when used as a field in a struct.
+	// 结构体的值的内存填充
 	FieldAlign() int
 
 	// Method returns the i'th method in the type's method set.
@@ -94,6 +96,7 @@ type Type interface {
 	String() string
 
 	// Kind returns the specific kind of this type.
+	// 返回基本类型
 	Kind() Kind
 
 	// Implements reports whether the type implements the interface type u.
@@ -260,7 +263,7 @@ const (
 
 // tflag is used by an rtype to signal what extra type information is
 // available in the memory directly following the rtype value.
-//
+// 指示在内存中紧随 rtype 之后的额外的信息
 // tflag values must be kept in sync with copies in:
 //	cmd/compile/internal/gc/reflect.go
 //	cmd/link/internal/ld/decodesym.go
@@ -270,7 +273,7 @@ type tflag uint8
 const (
 	// tflagUncommon means that there is a pointer, *uncommonType,
 	// just beyond the outer type structure.
-	//
+	// 在外部结构体之外还有指针的存在
 	// For example, if t.Kind() == Struct and t.tflag&tflagUncommon != 0,
 	// then t has uncommonType data and it can be accessed as:
 	//
@@ -285,6 +288,7 @@ const (
 	// extraneous '*' prefix. This is because for most types T in
 	// a program, the type *T also exists and reusing the str data
 	// saves binary size.
+	// string 字段中的名称带有多余的 * 前缀
 	tflagExtraStar tflag = 1 << 1
 
 	// tflagNamed means the type has a name.
@@ -301,7 +305,7 @@ const (
 // rtype must be kept in sync with ../runtime/type.go:/^type._type.
 type rtype struct {
 	size       uintptr
-	ptrdata    uintptr // number of bytes in the type that can contain pointers
+	ptrdata    uintptr // number of bytes in the type that can contain pointers 包含指针的类型数
 	hash       uint32  // hash of type; avoids computation in hash tables
 	tflag      tflag   // extra type information flags
 	align      uint8   // alignment of variable with this type
@@ -327,6 +331,8 @@ type method struct {
 // (if T is a defined type, the uncommonTypes for T and *T have methods).
 // Using a pointer to this struct reduces the overall size required
 // to describe a non-defined type with no methods.
+// uncommonType 只对已经定义的类型和带有方法的类型存在，如果T是一个已定义的类型，T 和 *T 的 uncommonType 都有方法
+// 使用执行该结构的指针能够减少描述没有方法的未定义类型所需的总体大小  救救我，这是啥意思
 type uncommonType struct {
 	pkgPath nameOff // import path; empty for built-in types like int, string
 	mcount  uint16  // number of methods
@@ -569,6 +575,8 @@ type Method struct {
 	// method name. It is empty for upper case (exported) method names.
 	// The combination of PkgPath and Name uniquely identifies a method
 	// in a method set.
+	// 如果是导出的函数 PkgPath 为空
+	// PkgPath 和 Name 的组合，是函数集合中的唯一标识
 	// See https://golang.org/ref/spec#Uniqueness_of_identifiers
 	Name    string
 	PkgPath string
@@ -816,6 +824,7 @@ func (t *rtype) Method(i int) (m Method) {
 	for _, arg := range ft.in() {
 		in = append(in, arg)
 	}
+	// 返回值类型数组
 	out := make([]Type, 0, len(ft.out()))
 	for _, ret := range ft.out() {
 		out = append(out, ret)
@@ -1929,6 +1938,7 @@ type funcTypeFixed128 struct {
 // The variadic argument controls whether the function is variadic. FuncOf
 // panics if the in[len(in)-1] does not represent a slice and variadic is
 // true.
+// variadic 代表是否是可变参数，如果 variadic 为true， 而 in[len(in)-1] 不是 slice （最后一个参数是可变参数），则 panic
 func FuncOf(in, out []Type, variadic bool) Type {
 	if variadic && (len(in) == 0 || in[len(in)-1].Kind() != Slice) {
 		panic("reflect.FuncOf: last arg of variadic func must be slice")
