@@ -377,9 +377,11 @@ type maptype struct {
 
 // Note: flag values must match those used in the TMAP case
 // in ../cmd/compile/internal/gc/reflect.go:dtypesym.
+// 当 key 大小 > 128 字节时，为true
 func (mt *maptype) indirectkey() bool { // store ptr to key instead of key itself
 	return mt.flags&1 != 0
 }
+// 当 elem 大小 > 128 字节， 为 true
 func (mt *maptype) indirectelem() bool { // store ptr to elem instead of elem itself
 	return mt.flags&2 != 0
 }

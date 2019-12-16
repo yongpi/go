@@ -341,6 +341,7 @@ func reflect_typedmemclrpartial(typ *_type, ptr unsafe.Pointer, off, size uintpt
 // pointers, usually by checking typ.ptrdata. However, ptr
 // does not have to point to the start of the allocation.
 //
+// 从指针 ptr 开始 清理 n bytes 的内存
 //go:nosplit
 func memclrHasPointers(ptr unsafe.Pointer, n uintptr) {
 	bulkBarrierPreWrite(uintptr(ptr), 0, n)
