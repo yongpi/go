@@ -22,7 +22,7 @@ import (
 // or (2) when multiple goroutines read, write, and overwrite entries for disjoint
 // sets of keys. In these two cases, use of a Map may significantly reduce lock
 // contention compared to a Go map paired with a separate Mutex or RWMutex.
-//
+//  Map 类型是为了一下两类场景优化的
 // The zero Map is empty and ready for use. A Map must not be copied after first use.
 type Map struct {
 	mu Mutex

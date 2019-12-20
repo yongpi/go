@@ -39,6 +39,7 @@ func semasleep(ns int64) int32 {
 		start = nanotime()
 	}
 	mp := getg().m
+	// 互斥锁锁定
 	pthread_mutex_lock(&mp.mutex)
 	for {
 		if mp.count > 0 {
@@ -60,6 +61,7 @@ func semasleep(ns int64) int32 {
 				return -1
 			}
 		} else {
+			// 被唤醒之后继续 for 循环, 此时 mp.count 已经大于0了
 			pthread_cond_wait(&mp.cond, &mp.mutex)
 		}
 	}

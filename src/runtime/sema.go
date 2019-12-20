@@ -13,7 +13,8 @@
 // Think of them as a way to implement sleep and wakeup
 // such that every sleep is paired with a single wakeup,
 // even if, due to races, the wakeup happens before the sleep.
-//
+// 不要认为这些是信号量，只是用来实现 sleep 和 wakeup 的一种方式。
+// 每一个 sleep 都有对应的一个 wakeup，即使在发生 race 时， wakeup 发生在 sleep 之前
 // See Mullender and Cox, ``Semaphores in Plan 9,''
 // https://swtch.com/semaphore.pdf
 
@@ -112,6 +113,7 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	//	enqueue itself as a waiter
 	//	sleep
 	//	(waiter descriptor is dequeued by signaler)
+	// 获取一个 sudog
 	s := acquireSudog()
 	root := semroot(addr)
 	t0 := int64(0)

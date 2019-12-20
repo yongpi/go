@@ -192,17 +192,20 @@ needtls:
 	CALL	runtime·abort(SB)
 ok:
 	// set the per-goroutine and per-mach "registers"
+	// 获取 g0 和 m0
 	get_tls(BX)
 	LEAQ	runtime·g0(SB), CX
 	MOVQ	CX, g(BX)
 	LEAQ	runtime·m0(SB), AX
 
+    // g0 和 m0 互相绑定
 	// save m->g0 = g0
 	MOVQ	CX, m_g0(AX)
 	// save m0 to g0->m
 	MOVQ	AX, g_m(CX)
 
 	CLD				// convention is D is always left cleared
+	// 一些基本数据的检查
 	CALL	runtime·check(SB)
 
 	MOVL	16(SP), AX		// copy argc

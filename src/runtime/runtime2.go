@@ -158,6 +158,8 @@ const (
 // as fast as spin locks (just a few user-level instructions),
 // but on the contention path they sleep in the kernel.
 // A zeroed Mutex is unlocked (no need to initialize each lock).
+// 互斥锁，在无竞争条件下和自旋锁一样快，在竞争状态下，会在内核中sleep
+// 零值的mutex 是 unlocked 状态，所以不需要初始化
 type mutex struct {
 	// Futex-based impl treats it as uint32 key,
 	// while sema-based impl as M* waitm.
@@ -339,6 +341,10 @@ type gobuf struct {
 //
 // sudogs are allocated from a special pool. Use acquireSudog and
 // releaseSudog to allocate and free them.
+// sudog 表示 g 在一个等待队列，sudog 是必须的，因为 g 和 同步对象的关系是多对多的
+// 一个 g 可以出现在很多等待队列里， 所以对于一个 g 来说，有可能存在很多 sudog
+// 很多 g 可能等待一个同步对象，所以也有可能对一个同步对象来说，有多个 sudog
+// sudog 从一个特殊的池里分配，使用 acquireSudog 和 releaseSudog 分配和释放他们
 type sudog struct {
 	// The following fields are protected by the hchan.lock of the
 	// channel this sudog is blocking on. shrinkstack depends on
@@ -419,7 +425,7 @@ type g struct {
 	waitsince    int64      // approx time when the g become blocked
 	waitreason   waitReason // if status==Gwaiting
 
-	preempt       bool // preemption signal, duplicates stackguard0 = stackpreempt
+	preempt       bool // preemption signal, duplicates stackguard0 = stackpreempt  抢占信号,等于 stackguard0 = stackpreempt
 	preemptStop   bool // transition to _Gpreempted on preemption; otherwise, just deschedule
 	preemptShrink bool // shrink stack at synchronous safe point
 
