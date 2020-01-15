@@ -284,6 +284,7 @@ func libpreinit() {
 // Called to initialize a new m (including the bootstrap m).
 // Called on the parent thread (main thread in case of bootstrap), can allocate memory.
 func mpreinit(mp *m) {
+	// 分配一个用来信号处理的 g
 	mp.gsignal = malg(32 * 1024) // OS X wants >= 8K
 	mp.gsignal.m = mp
 }

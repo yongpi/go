@@ -13,6 +13,9 @@
 // Think of them as a way to implement sleep and wakeup
 // such that every sleep is paired with a single wakeup,
 // even if, due to races, the wakeup happens before the sleep.
+// 这里的信号量跟 Linux 的 futex 目标是一样的，不过语义简单一点
+// -- 这里科普一下 Linux futex， 类似于 Java 虚拟机的轻量级锁， 线程进入互斥量之前先去看一下公用内存（简单表述）里的某个值有没有被改变，被改变说明已经有线程占用
+// 就需要进入到互斥锁中，该锁定锁定该挂起挂起，加入没有改变，说明此时不处在竞态，就不需要进入互斥锁，减少互斥量的性能消耗。而大部分情况下都是不存在竞态的
 // 不要认为这些是信号量，只是用来实现 sleep 和 wakeup 的一种方式。
 // 每一个 sleep 都有对应的一个 wakeup，即使在发生 race 时， wakeup 发生在 sleep 之前
 // See Mullender and Cox, ``Semaphores in Plan 9,''
@@ -38,10 +41,14 @@ import (
 // See golang.org/issue/17953 for a program that worked badly
 // before we introduced the second level of list, and test/locklinear.go
 // for a test that exercises this.
+// 一个 semaRoot 持有不同地址的 sudog 的平衡树
+// 每一个 sudog 可能反过来指向等待在同一个地址上的 sudog 的列表
+// 对同一个地址上的 sudog 的内联列表的操作的时间复杂度都是O(1)，扫描 semaRoot 的顶部列表是 O(log n)
+// n 是 hash 到并且阻塞在同一个 semaRoot 上的不同地址的 goroutines 的总数
 type semaRoot struct {
 	lock  mutex
-	treap *sudog // root of balanced tree of unique waiters.
-	nwait uint32 // Number of waiters. Read w/o the lock.
+	treap *sudog // root of balanced tree of unique waiters. 不同 waiter 的平衡树
+	nwait uint32 // Number of waiters. Read w/o the lock. waiter 的数量
 }
 
 // Prime to not correlate with any user patterns.
@@ -115,11 +122,13 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	//	(waiter descriptor is dequeued by signaler)
 	// 获取一个 sudog
 	s := acquireSudog()
+	// 获取一个 semaRoot
 	root := semroot(addr)
 	t0 := int64(0)
 	s.releasetime = 0
 	s.acquiretime = 0
 	s.ticket = 0
+	// 一些性能采集的参数 应该是
 	if profile&semaBlockProfile != 0 && blockprofilerate > 0 {
 		t0 = cputicks()
 		s.releasetime = -1
@@ -131,8 +140,10 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		s.acquiretime = t0
 	}
 	for {
+		// 锁定在 semaRoot 上
 		lock(&root.lock)
 		// Add ourselves to nwait to disable "easy case" in semrelease.
+		// nwait 加一
 		atomic.Xadd(&root.nwait, 1)
 		// Check cansemacquire to avoid missed wakeup.
 		if cansemacquire(addr) {
@@ -142,7 +153,9 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		}
 		// Any semrelease after the cansemacquire knows we're waiting
 		// (we set nwait above), so go to sleep.
+		// 加到 semaRoot treap 上
 		root.queue(addr, s, lifo)
+		// 解锁 semaRoot ，并且把当前 g 的状态改为等待，然后让当前的 m 调用其他的 g 执行
 		goparkunlock(&root.lock, waitReasonSemacquire, traceEvGoBlockSync, 4+skipframes)
 		if s.ticket != 0 || cansemacquire(addr) {
 			break
@@ -151,6 +164,7 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	if s.releasetime > 0 {
 		blockevent(s.releasetime-t0, 3+skipframes)
 	}
+	// 释放 sudog
 	releaseSudog(s)
 }
 
@@ -165,6 +179,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 	// Easy case: no waiters?
 	// This check must happen after the xadd, to avoid a missed wakeup
 	// (see loop in semacquire).
+	// 没有等待的 sudog
 	if atomic.Load(&root.nwait) == 0 {
 		return
 	}
@@ -177,6 +192,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 		unlock(&root.lock)
 		return
 	}
+	// 从队列里取出来 sudog ，此时 ticket == 0
 	s, t0 := root.dequeue(addr)
 	if s != nil {
 		atomic.Xadd(&root.nwait, -1)
@@ -193,6 +209,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 		if handoff && cansemacquire(addr) {
 			s.ticket = 1
 		}
+		// 把 sudog 对应的 g 改为待执行状态，并且放到 此刻执行的 m 绑定的 p 本地队列的下一个执行
 		readyWithTime(s, 5+skipframes)
 		if s.ticket == 1 && getg().m.locks == 0 {
 			// Direct G handoff
@@ -211,6 +228,9 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 			// regime, and then we start to do direct handoffs of ticket and
 			// P.
 			// See issue 33747 for discussion.
+			// 调用调度器立即执行 G
+			// 等待的 g 继承时间片，避免无限制的争夺信号量
+			// 把当前 g 放到 p 本地队列的队尾，启动调度器，因为 s.g 在本地队列的下一个，所以调度器立马执行 s.g
 			goyield()
 		}
 	}
@@ -243,7 +263,7 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 	pt := &root.treap
 	for t := *pt; t != nil; t = *pt {
 		if t.elem == unsafe.Pointer(addr) {
-			// Already have addr in list.
+			// Already have add r in list.
 			if lifo {
 				// Substitute s in t's place in treap.
 				*pt = s
@@ -299,6 +319,8 @@ func (root *semaRoot) queue(addr *uint32, s *sudog, lifo bool) {
 	//
 	// s.ticket compared with zero in couple of places, therefore set lowest bit.
 	// It will not affect treap's quality noticeably.
+	// 使用 ticket 作为 treap 的权重
+	// 在其他一些地方 s.ticket 跟 0 相比，所以最低位设置1。不会明显影响 treap 的质量
 	s.ticket = fastrand() | 1
 	s.parent = last
 	*pt = s
@@ -451,6 +473,7 @@ func (root *semaRoot) rotateRight(y *sudog) {
 type notifyList struct {
 	// wait is the ticket number of the next waiter. It is atomically
 	// incremented outside the lock.
+	// 下一个等待者的票据， 在锁之外原子性增长
 	wait uint32
 
 	// notify is the ticket number of the next waiter to be notified. It can
@@ -460,6 +483,7 @@ type notifyList struct {
 	// handled as long as their "unwrapped" difference is bounded by 2^31.
 	// For this not to be the case, we'd need to have 2^31+ goroutines
 	// blocked on the same condvar, which is currently not possible.
+	// 下一个将会被通知的等待者票据，可以在锁之外读，但是只有持有锁的时候才能写
 	notify uint32
 
 	// List of parked waiters.
@@ -488,6 +512,7 @@ func notifyListAdd(l *notifyList) uint32 {
 // notifyListAdd was called, it returns immediately. Otherwise, it blocks.
 //go:linkname notifyListWait sync.runtime_notifyListWait
 func notifyListWait(l *notifyList, t uint32) {
+	// 锁 m
 	lock(&l.lock)
 
 	// Return right away if this ticket has already been notified.
@@ -499,6 +524,7 @@ func notifyListWait(l *notifyList, t uint32) {
 	// Enqueue itself.
 	s := acquireSudog()
 	s.g = getg()
+	// 票据
 	s.ticket = t
 	s.releasetime = 0
 	t0 := int64(0)
@@ -506,12 +532,14 @@ func notifyListWait(l *notifyList, t uint32) {
 		t0 = cputicks()
 		s.releasetime = -1
 	}
+	// 入链表
 	if l.tail == nil {
 		l.head = s
 	} else {
 		l.tail.next = s
 	}
 	l.tail = s
+	// 阻塞当前 g ，调度执行其他的 g
 	goparkunlock(&l.lock, waitReasonSyncCondWait, traceEvGoBlockCond, 3)
 	if t0 != 0 {
 		blockevent(s.releasetime-t0, 2)
@@ -556,6 +584,7 @@ func notifyListNotifyAll(l *notifyList) {
 func notifyListNotifyOne(l *notifyList) {
 	// Fast-path: if there are no new waiters since the last notification
 	// we don't need to acquire the lock at all.
+	// 说明已经唤醒完了
 	if atomic.Load(&l.wait) == atomic.Load(&l.notify) {
 		return
 	}
@@ -564,12 +593,14 @@ func notifyListNotifyOne(l *notifyList) {
 
 	// Re-check under the lock if we need to do anything.
 	t := l.notify
+	// 加锁之后再比较一下
 	if t == atomic.Load(&l.wait) {
 		unlock(&l.lock)
 		return
 	}
 
 	// Update the next notify ticket number.
+	// 下一个需要被唤醒的 g
 	atomic.Store(&l.notify, t+1)
 
 	// Try to find the g that needs to be notified.
@@ -597,7 +628,9 @@ func notifyListNotifyOne(l *notifyList) {
 				l.tail = p
 			}
 			unlock(&l.lock)
+			// 清空 sudog 的 next
 			s.next = nil
+			// 把 g 放到 p 的下一个执行的位置
 			readyWithTime(s, 4)
 			return
 		}

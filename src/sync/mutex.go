@@ -165,7 +165,7 @@ func (m *Mutex) lockSlow() {
 				if old&(mutexLocked|mutexWoken) != 0 || old>>mutexWaiterShift == 0 {
 					throw("sync: inconsistent mutex state")
 				}
-				// 等待队列数减一
+				// 等待队列数减一， 不在唤醒操作里减，在这里减，为了不多耗时
 				delta := int32(mutexLocked - 1<<mutexWaiterShift)
 				// 如果等待时间小于一毫秒，或者是最后一个 goroutine ，解除饥饿状态
 				if !starving || old>>mutexWaiterShift == 1 {
@@ -229,6 +229,7 @@ func (m *Mutex) unlockSlow(new int32) {
 			// since we did not observe mutexStarving when we unlocked the mutex above.
 			// So get off the way.
 			// 没有等待的队列或者又处在三个状态之一
+			// 处在这三个状态之一说明已经又在竞争锁了，而且没进入到队列中，这个时候就不需要唤醒队列里的 g了
 			if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
 				return
 			}
@@ -237,7 +238,7 @@ func (m *Mutex) unlockSlow(new int32) {
 			// 设置成已唤醒状态，而不是设置成0，为了新来的任务不至于在抢锁的第一道cas就成功，让新来的任务和唤醒的任务在 lockSlow 里抢一抢
 			new = (old - 1<<mutexWaiterShift) | mutexWoken
 			if atomic.CompareAndSwapInt32(&m.state, old, new) {
-				// 唤醒下一个
+				// 把等待队列中的sudog 对应的 g 变成待执行状态，并且放到当前 m 关联的 p 的队列的下一个执行的位置，等待 m 执行
 				runtime_Semrelease(&m.sema, false, 1)
 				return
 			}
@@ -249,7 +250,8 @@ func (m *Mutex) unlockSlow(new int32) {
 		// Note: mutexLocked is not set, the waiter will set it after wakeup.
 		// But mutex is still considered locked if mutexStarving is set,
 		// so new coming goroutines won't acquire it.
-		// 饥饿状态直接唤醒第一个
+		// 把等待队列中的sudog 对应的 g 变成待执行状态，并且放到当前 m 关联的 p 的队列的下一个执行的位置
+		// 并且有可能会把当前 m 执行的 g 放到 p 本地队列的队尾，然后立刻执行上面的 g
 		runtime_Semrelease(&m.sema, true, 1)
 	}
 }

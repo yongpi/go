@@ -52,7 +52,9 @@ func NewCond(l Locker) *Cond {
 func (c *Cond) Wait() {
 	c.checker.check()
 	t := runtime_notifyListAdd(&c.notify)
+	// 先解锁，释放在锁定等待的其他 g
 	c.L.Unlock()
+	// 插入到 notify 的链表，并且阻塞
 	runtime_notifyListWait(&c.notify, t)
 	c.L.Lock()
 }
@@ -70,14 +72,16 @@ func (c *Cond) Signal() {
 //
 // It is allowed but not required for the caller to hold c.L
 // during the call.
+// 唤醒全部
 func (c *Cond) Broadcast() {
 	c.checker.check()
 	runtime_notifyListNotifyAll(&c.notify)
 }
 
 // copyChecker holds back pointer to itself to detect object copying.
+// 保留指向自身的指针检测对象拷贝
 type copyChecker uintptr
-
+// 把 copyChecker 的值设为自身的指针值，假如被拷贝了，判断自身的值和指针的值是否一致
 func (c *copyChecker) check() {
 	if uintptr(*c) != uintptr(unsafe.Pointer(c)) &&
 		!atomic.CompareAndSwapUintptr((*uintptr)(c), 0, uintptr(unsafe.Pointer(c))) &&

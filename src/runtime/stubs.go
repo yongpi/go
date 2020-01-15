@@ -32,6 +32,8 @@ func getg() *g
 // This must NOT be go:noescape: if fn is a stack-allocated closure,
 // fn puts g on a run queue, and g executes before fn returns, the
 // closure will be invalidated while it is still executing.
+// mcall 从当前 g 切换到 g0堆栈，并且调用fn(g) ， 参数 g 就是切换之前的 g
+// mcall将g的当前PC / SP保存在g-> sched中，以便以后可以恢复
 func mcall(fn func(*g))
 
 // systemstack runs fn on a system stack.
@@ -50,7 +52,9 @@ func mcall(fn func(*g))
 //		x = bigcall(y)
 //	})
 //	... use x ...
-//
+// 在系统的堆栈上运行 fn
+// 如果从每个os线程（g0）堆栈或者从信号处理堆栈调用 systemstack, systemstack 立刻调用 fn 并且返回  啥是信号处理堆栈(gsignal) -- 是在 m 上的一个信号处理 g
+// 如果从普通的 goroutine 的堆栈调用 systemstack, systemstack 会切换成os线程堆栈，调用 fn 之后再切换回去
 //go:noescape
 func systemstack(fn func())
 

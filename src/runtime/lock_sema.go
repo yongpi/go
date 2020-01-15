@@ -65,7 +65,7 @@ Loop:
 			i = 0
 		}
 		if i < spin {
-			// 自旋三十次
+			// 空转三十次
 			procyield(active_spin_cnt)
 		} else if i < spin+passive_spin {
 			// 让出CPU，实现是睡眠一微秒

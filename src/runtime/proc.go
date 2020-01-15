@@ -284,9 +284,10 @@ func goschedguarded() {
 // It is displayed in stack traces and heap dumps.
 // Reasons should be unique and descriptive.
 // Do not re-use reasons, add new ones.
+// 把当前的 goroutine 改为等待状态，并且调用 unlockf 函数，如果函数返回 flase，则当前 g 被恢复
 func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason waitReason, traceEv byte, traceskip int) {
 	if reason != waitReasonSleep {
-		checkTimeouts() // timeouts may expire while two goroutines keep the scheduler busy
+		checkTimeouts() // timeouts may expire while two goroutines keep the scheduler busy 两个 goroutine 使调度器忙时，有可能会超时
 	}
 	mp := acquirem()
 	gp := mp.curg
@@ -295,6 +296,7 @@ func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason w
 		throw("gopark: bad g status")
 	}
 	mp.waitlock = lock
+	// 记住： unlockf 有可能永远返回 true
 	mp.waitunlockf = unlockf
 	gp.waitreason = reason
 	mp.waittraceev = traceEv
@@ -312,6 +314,7 @@ func goparkunlock(lock *mutex, reason waitReason, traceEv byte, traceskip int) {
 
 func goready(gp *g, traceskip int) {
 	systemstack(func() {
+		// 切换成os堆栈执行 ready
 		ready(gp, traceskip, true)
 	})
 }
@@ -326,11 +329,16 @@ func acquireSudog() *sudog {
 	// Break the cycle by doing acquirem/releasem around new(sudog).
 	// The acquirem/releasem increments m.locks during new(sudog),
 	// which keeps the garbage collector from being invoked.
+	// 在 new(sudog) 上下通过 acquirem 和 releasem 增加 m.locks 来打破循环
+	// 防止垃圾回收器被调用
 	mp := acquirem()
 	pp := mp.p.ptr()
+	// 当前 p 中没有 sudog
 	if len(pp.sudogcache) == 0 {
+		// 锁一下调度器中的 lock
 		lock(&sched.sudoglock)
 		// First, try to grab a batch from central cache.
+		// 先从调度器里 sudog 的中央缓存中获取 sudog 存到 p 的 sudogcache 里
 		for len(pp.sudogcache) < cap(pp.sudogcache)/2 && sched.sudogcache != nil {
 			s := sched.sudogcache
 			sched.sudogcache = s.next
@@ -344,6 +352,7 @@ func acquireSudog() *sudog {
 		}
 	}
 	n := len(pp.sudogcache)
+	// 取最后一个 sudog
 	s := pp.sudogcache[n-1]
 	pp.sudogcache[n-1] = nil
 	pp.sudogcache = pp.sudogcache[:n-1]
@@ -380,6 +389,7 @@ func releaseSudog(s *sudog) {
 	}
 	mp := acquirem() // avoid rescheduling to another P
 	pp := mp.p.ptr()
+	// 把 p sudogcache 中一半的 sudog 转移到调度器 sudogcache 里
 	if len(pp.sudogcache) == cap(pp.sudogcache) {
 		// Transfer half of local cache to the central cache.
 		var first, last *sudog
@@ -400,6 +410,7 @@ func releaseSudog(s *sudog) {
 		sched.sudogcache = first
 		unlock(&sched.sudoglock)
 	}
+	// 把 sudog 放回 p
 	pp.sudogcache = append(pp.sudogcache, s)
 	releasem(mp)
 }
@@ -532,11 +543,13 @@ func cpuinit() {
 func schedinit() {
 	// raceinit must be the first call to race detector.
 	// In particular, it must be done before mallocinit below calls racemapshadow.
+	// 这个时候 p 还没有， 哪来的 g 呢。其实此处是 g0，在 asm_amd64.s 的 runtime·rt0_go 中已经初始化 g0 和 m0 了
+	// 并且 m0 和 g0 互相绑定了
 	_g_ := getg()
 	if raceenabled {
 		_g_.racectx, raceprocctx0 = raceinit()
 	}
-
+	// m 最大数量
 	sched.maxmcount = 10000
 
 	tracebackinit()
@@ -544,6 +557,7 @@ func schedinit() {
 	stackinit()
 	mallocinit()
 	fastrandinit() // must run before mcommoninit
+	// 初始化 m0
 	mcommoninit(_g_.m)
 	cpuinit()       // must run before alginit
 	alginit()       // maps must not be used before this call
@@ -609,6 +623,7 @@ func mcommoninit(mp *m) {
 	_g_ := getg()
 
 	// g0 stack won't make sense for user (and is not necessary unwindable).
+	// 当前的 g 必须是 g0
 	if _g_ != _g_.m.g0 {
 		callers(1, mp.createstack[:])
 	}
@@ -617,16 +632,20 @@ func mcommoninit(mp *m) {
 	if sched.mnext+1 < sched.mnext {
 		throw("runtime: thread ID overflow")
 	}
+	// m 的 id 是创建 m 的顺序
 	mp.id = sched.mnext
 	sched.mnext++
+	// 检查一下 m 的数量有没有超过最大数量限制
 	checkmcount()
 
+	// 也许是随机数
 	mp.fastrand[0] = uint32(int64Hash(uint64(mp.id), fastrandseed))
 	mp.fastrand[1] = uint32(int64Hash(uint64(cputicks()), ^fastrandseed))
 	if mp.fastrand[0]|mp.fastrand[1] == 0 {
 		mp.fastrand[1] = 1
 	}
 
+	// 给 m 分配一个用来处理信号的 g
 	mpreinit(mp)
 	if mp.gsignal != nil {
 		mp.gsignal.stackguard1 = mp.gsignal.stack.lo + _StackGuard
@@ -634,6 +653,7 @@ func mcommoninit(mp *m) {
 
 	// Add to allm so garbage collector doesn't free g->m
 	// when it is just in a register or thread-local storage.
+	// 指向 allm 以后，即使 m 是在寄存器或者线程本地存储也不会释放 g->m
 	mp.alllink = allm
 
 	// NumCgoCall() iterates over allm w/o schedlock,
@@ -663,6 +683,7 @@ func ready(gp *g, traceskip int, next bool) {
 	status := readgstatus(gp)
 
 	// Mark runnable.
+	// 此刻的— _g_ 不是 gp
 	_g_ := getg()
 	mp := acquirem() // disable preemption because it can be holding p in a local var
 	if status&^_Gscan != _Gwaiting {
@@ -672,7 +693,9 @@ func ready(gp *g, traceskip int, next bool) {
 
 	// status is Gwaiting or Gscanwaiting, make Grunnable and put on runq
 	casgstatus(gp, _Gwaiting, _Grunnable)
+	// 把 g 放到当前 m 绑定的 p 的本地队列，next 为 true， 就放在下一个执行， next 为 false，放在队尾
 	runqput(_g_.m.p.ptr(), gp, next)
+	// TODO 这个看了调度代码再解释
 	if atomic.Load(&sched.npidle) != 0 && atomic.Load(&sched.nmspinning) == 0 {
 		wakep()
 	}
@@ -2604,9 +2627,12 @@ top:
 // appropriate time. After calling dropg and arranging for gp to be
 // readied later, the caller can do other work but eventually should
 // call schedule to restart the scheduling of goroutines on this m.
+// 删除 m 和当前 g 也就是 m->curg 的关系，当调用者设置 g 的状态从运行到其他的状态是，应该立即调用该方法
+// 调用方还负责安排在适当的时间使用ready重新启动gp。 在调用dropg并安排了稍后准备好gp之后，调用者可以执行其他工作，但最终应调用schedule来重新启动此m上的goroutine调度。
 func dropg() {
 	_g_ := getg()
-
+	// 也许 g0 关联了 m 但是 m 的 curg 没有关联 g0， 这样才解释的通
+	// 假如当前 g 是 g0也没关系，_g_.m.curg 指向的应该不是 g0，是别的切换 g0 之前的 g
 	setMNoWB(&_g_.m.curg.m, nil)
 	setGNoWB(&_g_.m.curg, nil)
 }
@@ -2673,17 +2699,22 @@ func parkunlock_c(gp *g, lock unsafe.Pointer) bool {
 }
 
 // park continuation on g0.
+// 在 g0 上继续 park
 func park_m(gp *g) {
+	// 当前 g 是g0
 	_g_ := getg()
 
 	if trace.enabled {
 		traceGoPark(_g_.m.waittraceev, _g_.m.waittraceskip)
 	}
 
+	// 设置参数 g 的状态
 	casgstatus(gp, _Grunning, _Gwaiting)
+	// 删除参数 g 和 m 的关系
 	dropg()
 
 	if fn := _g_.m.waitunlockf; fn != nil {
+		// 执行解锁操作， 假如是从 sema 过来的，fn 永远返回 true
 		ok := fn(gp, _g_.m.waitlock)
 		_g_.m.waitunlockf = nil
 		_g_.m.waitlock = nil
@@ -2695,6 +2726,7 @@ func park_m(gp *g) {
 			execute(gp, true) // Schedule it back, never returns.
 		}
 	}
+	// 调度其他的 g 执行
 	schedule()
 }
 
@@ -3609,6 +3641,7 @@ retry:
 }
 
 // Purge all cached G's from gfree list to the global list.
+// 转移 gfree 里的 g 到 sched.gfree
 func gfpurge(_p_ *p) {
 	lock(&sched.gFree.lock)
 	for !_p_.gFree.empty() {
@@ -4029,6 +4062,7 @@ func setcpuprofilerate(hz int32) {
 // init initializes pp, which may be a freshly allocated p or a
 // previously destroyed p, and transitions it to status _Pgcstop.
 func (pp *p) init(id int32) {
+	// id 也是创建 p 的顺序
 	pp.id = id
 	pp.status = _Pgcstop
 	pp.sudogcache = pp.sudogbuf[:0]
@@ -4041,8 +4075,10 @@ func (pp *p) init(id int32) {
 			if getg().m.mcache == nil {
 				throw("missing mcache?")
 			}
+			// m0
 			pp.mcache = getg().m.mcache // bootstrap
 		} else {
+			// 分配 mcache
 			pp.mcache = allocmcache()
 		}
 	}
@@ -4062,6 +4098,7 @@ func (pp *p) init(id int32) {
 // sched.lock must be held and the world must be stopped.
 func (pp *p) destroy() {
 	// Move all runnable goroutines to the global queue
+	// 把所有的 g 都转移到 sched 的全局队列上去
 	for pp.runqhead != pp.runqtail {
 		// Pop from tail of local queue
 		pp.runqtail--
@@ -4069,10 +4106,12 @@ func (pp *p) destroy() {
 		// Push onto head of global queue
 		globrunqputhead(gp)
 	}
+	// 同样移动到全局队列
 	if pp.runnext != 0 {
 		globrunqputhead(pp.runnext.ptr())
 		pp.runnext = 0
 	}
+	// 转移 timers ，暂时 timer 是干啥用的
 	if len(pp.timers) > 0 {
 		plocal := getg().m.p.ptr()
 		// The world is stopped, but we acquire timersLock to
@@ -4089,6 +4128,7 @@ func (pp *p) destroy() {
 	}
 	// If there's a background worker, make it runnable and put
 	// it on the global queue so it can clean itself up.
+	// 后台运行的 worker 也转移到全局队列中
 	if gp := pp.gcBgMarkWorker.ptr(); gp != nil {
 		casgstatus(gp, _Gwaiting, _Grunnable)
 		if trace.enabled {
@@ -4100,20 +4140,24 @@ func (pp *p) destroy() {
 		pp.gcBgMarkWorker.set(nil)
 	}
 	// Flush p's write barrier buffer.
+	// 刷新 p 的写屏障 buffer
 	if gcphase != _GCoff {
 		wbBufFlush1(pp)
 		pp.gcw.dispose()
 	}
+	// 直接清空 sudogbuf 和 sudogcache
 	for i := range pp.sudogbuf {
 		pp.sudogbuf[i] = nil
 	}
 	pp.sudogcache = pp.sudogbuf[:0]
+	// 同样，清空 deferpool 和 deferpoolbuf
 	for i := range pp.deferpool {
 		for j := range pp.deferpoolbuf[i] {
 			pp.deferpoolbuf[i][j] = nil
 		}
 		pp.deferpool[i] = pp.deferpoolbuf[i][:0]
 	}
+	// 应该是释放内存
 	systemstack(func() {
 		for i := 0; i < pp.mspancache.len; i++ {
 			// Safe to call since the world is stopped.
@@ -4122,8 +4166,10 @@ func (pp *p) destroy() {
 		pp.mspancache.len = 0
 		pp.pcache.flush(&mheap_.pages)
 	})
+	// 释放 mcache
 	freemcache(pp.mcache)
 	pp.mcache = nil
+	// 转移 gfree
 	gfpurge(pp)
 	traceProcFree(pp)
 	if raceenabled {
@@ -4146,6 +4192,7 @@ func (pp *p) destroy() {
 		pp.raceprocctx = 0
 	}
 	pp.gcAssistTime = 0
+	// 改变状态
 	pp.status = _Pdead
 }
 
@@ -4170,6 +4217,7 @@ func procresize(nprocs int32) *p {
 	sched.procresizetime = now
 
 	// Grow allp if necessary.
+	// 扩张 p
 	if nprocs > int32(len(allp)) {
 		// Synchronize with retake, which could be running
 		// concurrently since it doesn't run on a P.
@@ -4187,11 +4235,13 @@ func procresize(nprocs int32) *p {
 	}
 
 	// initialize new P's
+	// 初始化 p
 	for i := old; i < nprocs; i++ {
 		pp := allp[i]
 		if pp == nil {
 			pp = new(p)
 		}
+		// 初始化 p 的一些信息， id mcache等
 		pp.init(i)
 		atomicstorep(unsafe.Pointer(&allp[i]), unsafe.Pointer(pp))
 	}
@@ -4222,6 +4272,7 @@ func procresize(nprocs int32) *p {
 		p := allp[0]
 		p.m = 0
 		p.status = _Pidle
+		// p 绑定当前 m， 并且把 p 的状态设置为 _Prunning
 		acquirep(p)
 		if trace.enabled {
 			traceGoStart()
@@ -4229,8 +4280,10 @@ func procresize(nprocs int32) *p {
 	}
 
 	// release resources from unused P's
+	// 释放不使用的 p
 	for i := nprocs; i < old; i++ {
 		p := allp[i]
+		// 释放 p ，转移相应的 g，释放内存，改变状态
 		p.destroy()
 		// can't free P itself because it can be referenced by an M in syscall
 	}
@@ -4242,6 +4295,7 @@ func procresize(nprocs int32) *p {
 		unlock(&allpLock)
 	}
 
+	// 返回一个可用的 p
 	var runnablePs *p
 	for i := nprocs - 1; i >= 0; i-- {
 		p := allp[i]
@@ -4250,6 +4304,7 @@ func procresize(nprocs int32) *p {
 		}
 		p.status = _Pidle
 		if runqempty(p) {
+			// 把 p 放到调度器空闲 p 的队列里
 			pidleput(p)
 		} else {
 			p.m.set(mget())
@@ -4269,6 +4324,7 @@ func procresize(nprocs int32) *p {
 // isn't because it immediately acquires _p_.
 //
 //go:yeswritebarrierrec
+// 关联 p 和当前 m
 func acquirep(_p_ *p) {
 	// Do the part that isn't allowed to have write barriers.
 	wirep(_p_)
@@ -4841,10 +4897,12 @@ func mput(mp *m) {
 // Try to get an m from midle list.
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
+// 获取一个空闲 m 从 m 空闲列表中
 //go:nowritebarrierrec
 func mget() *m {
 	mp := sched.midle.ptr()
 	if mp != nil {
+		// 指向下一个空闲的 m
 		sched.midle = mp.schedlink
 		sched.nmidle--
 	}
@@ -4915,7 +4973,9 @@ func pidleput(_p_ *p) {
 	if !runqempty(_p_) {
 		throw("pidleput: P has non-empty run queue")
 	}
+	// 指向调度器前一个空闲 p
 	_p_.link = sched.pidle
+	// 把当前 p 设置为调度器空闲 p， 因为 p.link 已经指向前一个空闲 p，所以这些 p 形成了一个空闲链表
 	sched.pidle.set(_p_)
 	atomic.Xadd(&sched.npidle, 1) // TODO: fast atomic
 }

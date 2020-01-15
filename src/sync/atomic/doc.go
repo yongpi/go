@@ -37,6 +37,8 @@
 // functions, are the atomic equivalents of "return *addr" and
 // "*addr = val".
 //
+// atomic 是线性一致模型，使用 Store 操作过的元素，其他线程或者 g 使用 load 都能立马可见
+// 并且 store 是全局有序的，你在任何一个 g 中观察到的 atomic 全局变量的变化顺序都是一致的
 package atomic
 
 import (

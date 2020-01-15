@@ -24,6 +24,15 @@ import (
 // contention compared to a Go map paired with a separate Mutex or RWMutex.
 //  Map 类型是为了一下两类场景优化的
 // The zero Map is empty and ready for use. A Map must not be copied after first use.
+// 总结！！！！！！！！
+// 先来康一康 Map 的结构，mu 是锁，不多说。 read 其实是 readOnly 类型，至于为啥用 atomic.Value 不直接使用 readOnly
+// 原子操作呗，只要 store 成功，其他的 g 获取时就是最新的 readOnly，不使用原子变量有可能更改之后对其他的 m 或者 g 不可见，或者说更改操作本身就不是原子的
+// 说回来，read 是干啥使的， read 只用来读取和删除，读取的时候不加锁，删除的时候使用自旋加上 CAS ，不加锁并且保证成功
+// dirty 是用来读和写的，刚开始的元素都会放到 dirty 里，假如获取 key 的时候，read 一直没命中，当 misses == len(dirty) 时，会把 dirty 里的值转移到 read 里，
+// 并且把 dirty 置为 nil， 这个时候假如写进来一个新的 key 和 value，这个时候会把 read 里的没删除的值复制一份到 dirty 里， 并且把新的值放到 dirty里
+// 也就是说，重中之重来了，然我来新起一行
+// read 用来读和删除的时候不会加锁，所以很快，删除也不是真删除。dirty 为 nil 或者 read 的父集合，read 中包含 read 中有的和没有的值，包括新插入的元素
+// 每当 read 错过命中的个数超过 dirty 的 len 时，就会把 dirty 转移到 read 中， 读写分离了
 type Map struct {
 	mu Mutex
 

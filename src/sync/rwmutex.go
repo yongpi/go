@@ -25,6 +25,11 @@ import (
 // recursive read locking. This is to ensure that the lock eventually becomes
 // available; a blocked Lock call excludes new readers from acquiring the
 // lock.
+// 代码很容易读懂，大概说一下逻辑吧，读和读的 g 之间不会阻塞，只是对 readerCount 做原子性的+1和-1，
+// 假如多个读 g， 此时有写操作的 g 进来,写操作的 g 会改变 readerCount 和 readerWait 的值
+// 此时再进来的读操作的 g 都会阻塞，而写操作也会阻塞，直到写操作来之前的所有读操作的 g 完成，才会唤醒写操作的 g
+// readerCount 用来表示所有读操作的 g 的数量，包括阻塞的和正在执行的， readerWait 表示快要出离的读操作的 g
+// 只有写操作进来时，readerWait 的值才会变化，表示写操作进来之前已经获取读锁的 g
 type RWMutex struct {
 	w           Mutex  // held if there are pending writers
 	writerSem   uint32 // semaphore for writers to wait for completing readers
@@ -45,8 +50,10 @@ func (rw *RWMutex) RLock() {
 		_ = rw.w.state
 		race.Disable()
 	}
+	// 增加 reader 数量
 	if atomic.AddInt32(&rw.readerCount, 1) < 0 {
 		// A writer is pending, wait for it.
+		// 当前有 writer
 		runtime_SemacquireMutex(&rw.readerSem, false, 0)
 	}
 	if race.Enabled {
@@ -65,6 +72,7 @@ func (rw *RWMutex) RUnlock() {
 		race.ReleaseMerge(unsafe.Pointer(&rw.writerSem))
 		race.Disable()
 	}
+	// 当前有写操作侵入
 	if r := atomic.AddInt32(&rw.readerCount, -1); r < 0 {
 		// Outlined slow-path to allow the fast-path to be inlined
 		rw.rUnlockSlow(r)
@@ -80,8 +88,10 @@ func (rw *RWMutex) rUnlockSlow(r int32) {
 		throw("sync: RUnlock of unlocked RWMutex")
 	}
 	// A writer is pending.
+	// 减少 readerWait 数量
 	if atomic.AddInt32(&rw.readerWait, -1) == 0 {
 		// The last reader unblocks the writer.
+		// 最后一个 reader 解锁 writer
 		runtime_Semrelease(&rw.writerSem, false, 1)
 	}
 }
@@ -99,6 +109,7 @@ func (rw *RWMutex) Lock() {
 	// Announce to readers there is a pending writer.
 	r := atomic.AddInt32(&rw.readerCount, -rwmutexMaxReaders) + rwmutexMaxReaders
 	// Wait for active readers.
+	// 有读操作，等待多个多操作完成
 	if r != 0 && atomic.AddInt32(&rw.readerWait, r) != 0 {
 		runtime_SemacquireMutex(&rw.writerSem, false, 0)
 	}
@@ -129,6 +140,7 @@ func (rw *RWMutex) Unlock() {
 		throw("sync: Unlock of unlocked RWMutex")
 	}
 	// Unblock blocked readers, if any.
+	// 释放所有的读操作
 	for i := 0; i < int(r); i++ {
 		runtime_Semrelease(&rw.readerSem, false, 0)
 	}

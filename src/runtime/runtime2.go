@@ -114,6 +114,8 @@ const (
 	//
 	// The P is owned by the idle list or by whatever is
 	// transitioning its state. Its run queue is empty.
+	// p 没有被使用或调度，在空闲 p 的列表里等待被调用。
+	// 或者是其他状态转换的中间态，运行队列为空
 	_Pidle = iota
 
 	// _Prunning means a P is owned by an M and is being used to
@@ -123,6 +125,12 @@ const (
 	// do), _Psyscall (when entering a syscall), or _Pgcstop (to
 	// halt for the GC). The M may also hand ownership of the P
 	// off directly to another M (e.g., to schedule a locked G).
+	// 说明 p 被 m  拥有，并且被用来运行用户代码或者调度。只有拥有 p 的 m 才能
+	// 把 p 从 _Prunning 的状态改变。
+	// 假如没有更多的工作去做会改变成 _Pidle
+	// 进入系统调用时变成 _Psyscall
+	// 被 GC 暂停时变成 _Pgcstop
+	// m 也可以把所有权转给另外一个 m ，比如调度一个锁住的 g
 	_Prunning
 
 	// _Psyscall means a P is not running user code. It has
@@ -135,6 +143,10 @@ const (
 	// an M successfully CASes its original P back to _Prunning
 	// after a syscall, it must understand the P may have been
 	// used by another M in the interim.
+	// 意味着 p 没有在运行用户代码，对处在系统调用的 m 具有亲和力，但是并不是被 m 拥有
+	// 有可能会被其他的 m 偷走。和 _Pidle 状态有点相似，但是使用轻量级转换并保持M相似性
+	// 改变这个状态必须进行一个 cas，或者被偷或者重新被拥有。
+	// 注意 aba 问题
 	_Psyscall
 
 	// _Pgcstop means a P is halted for STW and owned by the M
@@ -145,12 +157,17 @@ const (
 	//
 	// The P retains its run queue and startTheWorld will restart
 	// the scheduler on Ps with non-empty run queues.
+	// 意味着 p 因为 STW 被停止，被拥有的 m 停止。STW 的 m 继续使用 p，
+	// 即使 p 处在 _Pgcstop 状态，从 _Prunning 变成 _Pgcstop 因为 m 对 p 的释放和阻塞
+	// p 保留自己的运行队列，start the world 将会重新调度非空运行队列的 p
 	_Pgcstop
 
 	// _Pdead means a P is no longer used (GOMAXPROCS shrank). We
 	// reuse Ps if GOMAXPROCS increases. A dead P is mostly
 	// stripped of its resources, though a few things remain
 	// (e.g., trace buffers).
+	// p 不再被使用， 但是如果 GOMAXPROCS 增加有可能会重新使用这个 p
+	// p 相关的大部分资源都被回收，除了一些，比如 trace buffer
 	_Pdead
 )
 
@@ -483,7 +500,7 @@ type m struct {
 
 	// Fields not known to debuggers.
 	procid        uint64       // for debuggers, but offset not hard-coded
-	gsignal       *g           // signal-handling g
+	gsignal       *g           // signal-handling g 信号处理的 g
 	goSigStack    gsignalStack // Go-allocated signal handling stack
 	sigmask       sigset       // storage for saved signal mask
 	tls           [6]uintptr   // thread-local storage (for x86 extern register)
@@ -681,10 +698,10 @@ type schedt struct {
 	midle        muintptr // idle m's waiting for work
 	nmidle       int32    // number of idle m's waiting for work
 	nmidlelocked int32    // number of locked m's waiting for work
-	mnext        int64    // number of m's that have been created and next M ID
+	mnext        int64    // number of m's that have been created and next M ID 下一个 m 的id，也表示 m 的数量，包含释放和未释放的 m
 	maxmcount    int32    // maximum number of m's allowed (or die)
 	nmsys        int32    // number of system m's not counted for deadlock
-	nmfreed      int64    // cumulative number of freed m's
+	nmfreed      int64    // cumulative number of freed m's  释放的 m 的数量
 
 	ngsys uint32 // number of system goroutines; updated atomically
 
@@ -716,7 +733,7 @@ type schedt struct {
 		n       int32
 	}
 
-	// Central cache of sudog structs.
+	// Central cache of sudog structs. sudog 的中央缓存
 	sudoglock  mutex
 	sudogcache *sudog
 
