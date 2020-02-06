@@ -216,15 +216,15 @@ ok:
 	CALL	runtime·osinit(SB)
 	CALL	runtime·schedinit(SB)
 
-	// create a new goroutine to start program
+	// create a new goroutine to start program 新建一个 g 启动项目
 	MOVQ	$runtime·mainPC(SB), AX		// entry
 	PUSHQ	AX
-	PUSHQ	$0			// arg size
+	PUSHQ	$0			// arg size 新建一个 g，也就是 main g， 任务函数式 runtime.main 函数
 	CALL	runtime·newproc(SB)
 	POPQ	AX
 	POPQ	AX
 
-	// start this M
+	// start this M 进入 m0 调度，执行 main groutine
 	CALL	runtime·mstart(SB)
 
 	CALL	runtime·abort(SB)	// mstart should never return
@@ -286,8 +286,8 @@ TEXT runtime·gogo(SB), NOSPLIT, $16-8
 	MOVQ	$0, gobuf_ret(BX)
 	MOVQ	$0, gobuf_ctxt(BX)
 	MOVQ	$0, gobuf_bp(BX)
-	MOVQ	gobuf_pc(BX), BX
-	JMP	BX
+	MOVQ	gobuf_pc(BX), BX  // 获取 g 的任务函数，也就是 goexit,在 newproc1 函数里已经把 goexit 压进 pc 里了
+	JMP	BX                     // 执行
 
 // func mcall(fn func(*g))
 // Switch to m->g0's stack, call fn(g).

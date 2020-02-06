@@ -331,6 +331,7 @@ func addtimer(t *timer) {
 	if t.status != timerNoStatus {
 		badTimer()
 	}
+	// 更改定时器的状态
 	t.status = timerWaiting
 
 	addInitializedTimer(t)
@@ -342,6 +343,7 @@ func addInitializedTimer(t *timer) {
 
 	pp := getg().m.p.ptr()
 	lock(&pp.timersLock)
+	// 新增之前先判断第一个 timer 是否需要删除
 	ok := cleantimers(pp) && doaddtimer(pp, t)
 	unlock(&pp.timersLock)
 	if !ok {
@@ -498,16 +500,20 @@ func dodeltimer0(pp *p) bool {
 	if t := pp.timers[0]; t.pp.ptr() != pp {
 		throw("dodeltimer0: wrong P")
 	} else {
+		// 删除和 p 的关联
 		t.pp = 0
 	}
 	last := len(pp.timers) - 1
 	if last > 0 {
+		// 把最后一个 timer 放在第一个
 		pp.timers[0] = pp.timers[last]
 	}
+	// 清除 timers
 	pp.timers[last] = nil
 	pp.timers = pp.timers[:last]
 	ok := true
 	if last > 0 {
+		// 调整堆顺序
 		ok = siftdownTimer(pp.timers, 0)
 	}
 	return ok
@@ -813,14 +819,17 @@ func cleantimers(pp *p) bool {
 			return true
 		}
 		t := pp.timers[0]
+		// 判断定时器的 p
 		if t.pp.ptr() != pp {
 			throw("cleantimers: bad p")
 		}
 		switch s := atomic.Load(&t.status); s {
+		// 删除定时器
 		case timerDeleted:
 			if !atomic.Cas(&t.status, s, timerRemoving) {
 				continue
 			}
+			// 从 p 上删除定时器
 			if !dodeltimer0(pp) {
 				return false
 			}
@@ -828,6 +837,7 @@ func cleantimers(pp *p) bool {
 				return false
 			}
 		case timerModifiedEarlier, timerModifiedLater:
+			// 删除当前 timer，并且新增一个 timer
 			if !atomic.Cas(&t.status, s, timerMoving) {
 				continue
 			}
@@ -918,12 +928,14 @@ func adjusttimers(pp *p) {
 		return
 	}
 	var moved []*timer
+	// 调整 timers
 	for i := 0; i < len(pp.timers); i++ {
 		t := pp.timers[i]
 		if t.pp.ptr() != pp {
 			throw("adjusttimers: bad p")
 		}
 		switch s := atomic.Load(&t.status); s {
+		// 该删除的删除
 		case timerDeleted:
 			if atomic.Cas(&t.status, s, timerRemoving) {
 				if !dodeltimer(pp, i) {
@@ -948,7 +960,9 @@ func adjusttimers(pp *p) {
 				}
 				moved = append(moved, t)
 				if s == timerModifiedEarlier {
+					// 立即放回到堆中
 					if n := atomic.Xadd(&pp.adjustTimers, -1); int32(n) <= 0 {
+						// 重新放回 timer 堆中
 						addAdjustedTimers(pp, moved)
 						return
 					}
@@ -974,11 +988,14 @@ func adjusttimers(pp *p) {
 
 // addAdjustedTimers adds any timers we adjusted in adjusttimers
 // back to the timer heap.
+// 重新放回 timer 四叉堆中
 func addAdjustedTimers(pp *p, moved []*timer) {
 	for _, t := range moved {
+		// 重新放回 timer 堆中
 		if !doaddtimer(pp, t) {
 			badTimer()
 		}
+		// 改变状态
 		if !atomic.Cas(&t.status, timerMoving, timerWaiting) {
 			badTimer()
 		}
@@ -991,6 +1008,9 @@ func addAdjustedTimers(pp *p, moved []*timer) {
 // any write barriers. Therefore, if there are any timers that needs
 // to be moved earlier, it conservatively returns the current time.
 // The netpoller M will wake up and adjust timers before sleeping again.
+// nobarrierWakeTime 查看 p 的定时器返回应该唤醒 netpoller 的时间，如果没有 timers 则返回 0
+// 当丢弃 p 的时候需要调用这个函数，并且不带任何的写屏障。如果有其他的 timers 需要被早点一出， 保守的返回当前的时间
+// 网络轮训器 m 会唤醒和调整 timers 在睡眠之前
 //go:nowritebarrierrec
 func nobarrierWakeTime(pp *p) int64 {
 	lock(&pp.timersLock)
@@ -1020,17 +1040,19 @@ func runtimer(pp *p, now int64) int64 {
 			throw("runtimer: bad p")
 		}
 		switch s := atomic.Load(&t.status); s {
+		// 等待执行的 timer
 		case timerWaiting:
 			if t.when > now {
 				// Not ready to run.
 				return t.when
 			}
-
+			// 改变状态为正在执行
 			if !atomic.Cas(&t.status, s, timerRunning) {
 				continue
 			}
 			// Note that runOneTimer may temporarily unlock
 			// pp.timersLock.
+			// 执行
 			runOneTimer(pp, t, now)
 			return 0
 
@@ -1101,15 +1123,18 @@ func runOneTimer(pp *p, t *timer, now int64) {
 
 	if t.period > 0 {
 		// Leave in heap but adjust next time to fire.
+		// 更新 when，调整 timer 堆
 		delta := t.when - now
 		t.when += t.period * (1 + -delta/t.period)
 		if !siftdownTimer(pp.timers, 0) {
 			badTimer()
 		}
+		// 改变状态
 		if !atomic.Cas(&t.status, timerRunning, timerWaiting) {
 			badTimer()
 		}
 	} else {
+		// 执行一次
 		// Remove from heap.
 		if !dodeltimer0(pp) {
 			badTimer()
@@ -1127,9 +1152,9 @@ func runOneTimer(pp *p, t *timer, now int64) {
 		}
 		gp.racectx = pp.timerRaceCtx
 	}
-
+	// 临时解锁
 	unlock(&pp.timersLock)
-
+	// 发生消息到 channel
 	f(arg, seq)
 
 	lock(&pp.timersLock)
@@ -1330,6 +1355,7 @@ func timeSleepUntilOld() int64 {
 // itself is called without locks, so racy calls can cause a timer to
 // change buckets while executing these functions.
 
+// 向上调整定时器
 func siftupTimer(t []*timer, i int) bool {
 	if i >= len(t) {
 		return false
@@ -1352,6 +1378,7 @@ func siftupTimer(t []*timer, i int) bool {
 	return true
 }
 
+// 调整四叉堆节点
 func siftdownTimer(t []*timer, i int) bool {
 	n := len(t)
 	if i >= n {

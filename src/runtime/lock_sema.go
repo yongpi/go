@@ -173,6 +173,7 @@ func notesleep(n *note) {
 	if gp != gp.m.g0 {
 		throw("notesleep not on g0")
 	}
+	// 检查 m 对应的互斥量
 	semacreate(gp.m)
 	if !atomic.Casuintptr(&n.key, 0, uintptr(unsafe.Pointer(gp.m))) {
 		// Must be locked (got wakeup).
