@@ -145,7 +145,7 @@ func gogo(buf *gobuf)
 func gosave(buf *gobuf)
 
 //go:noescape
-func jmpdefer(fv *funcval, argp uintptr)
+func jmpdefer(fv *funcval, argp uintptr)  // jmpdefer 执行完 fn 会反复调用 deferreturn，直到 g 上的 defer 链表为空，deferreturn 函数 return
 func asminit()
 func setg(gg *g)
 func breakpoint()

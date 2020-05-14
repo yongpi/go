@@ -227,9 +227,11 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	// to somewhere safe. The memmove below does that.
 	// Until the copy completes, we can only call nosplit routines.
 	sp := getcallersp()
+	// fn 的参数
 	argp := uintptr(unsafe.Pointer(&fn)) + unsafe.Sizeof(fn)
 	callerpc := getcallerpc()
 
+	// 新建 defer
 	d := newdefer(siz)
 	if d._panic != nil {
 		throw("deferproc: d.panic != nil after newdefer")
@@ -241,8 +243,10 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	case 0:
 		// Do nothing.
 	case sys.PtrSize:
+		// 参数是指针的话，直接指向 d 后面的内存地址
 		*(*uintptr)(deferArgs(d)) = *(*uintptr)(unsafe.Pointer(argp))
 	default:
+		// 把参数拷贝到 d 后面的内存
 		memmove(deferArgs(d), unsafe.Pointer(argp), uintptr(siz))
 	}
 
@@ -386,6 +390,7 @@ func newdefer(siz int32) *_defer {
 	gp := getg()
 	if sc < uintptr(len(p{}.deferpool)) {
 		pp := gp.m.p.ptr()
+		// p 里没有 defer，从全局 defer 池里拿
 		if len(pp.deferpool[sc]) == 0 && sched.deferpool[sc] != nil {
 			// Take the slow path on the system stack so
 			// we don't grow newdefer's stack.
@@ -408,6 +413,7 @@ func newdefer(siz int32) *_defer {
 	}
 	if d == nil {
 		// Allocate new defer+args.
+		// 新建 defer
 		systemstack(func() {
 			total := roundupsize(totaldefersize(uintptr(siz)))
 			d = (*_defer)(mallocgc(total, deferType, true))
@@ -425,6 +431,7 @@ func newdefer(siz int32) *_defer {
 	d.siz = siz
 	d.heap = true
 	d.link = gp._defer
+	// 把新建的 defer 放在头。 后进先出
 	gp._defer = d
 	return d
 }
@@ -522,6 +529,9 @@ func freedeferfn() {
 //
 // The single argument isn't actually used - it just has its address
 // taken so it can be matched against pending defers.
+// 如果函数调用了 defer, 会在函数末尾插入调用 deferreturn (和deferproc是成对出现的)
+// 假如 defer 函数里面调用 defer，编译器会调用 runtime·jmpdefer 跳到 deferreturn 被调用之前的点，
+// 结果就是 deferreturn 被一遍一遍的调用，直到没有 defer 函数
 //go:nosplit
 func deferreturn(arg0 uintptr) {
 	gp := getg()
@@ -553,6 +563,7 @@ func deferreturn(arg0 uintptr) {
 	case 0:
 		// Do nothing.
 	case sys.PtrSize:
+		// 把 d 后面的参数转移到 arg0 身上
 		*(*uintptr)(unsafe.Pointer(&arg0)) = *(*uintptr)(deferArgs(d))
 	default:
 		memmove(unsafe.Pointer(&arg0), deferArgs(d), uintptr(d.siz))
@@ -560,7 +571,9 @@ func deferreturn(arg0 uintptr) {
 	fn := d.fn
 	d.fn = nil
 	gp._defer = d.link
+	// 释放
 	freedefer(d)
+	// 调用 fn 函数，jmpdefer 执行完 fn 会反复调用 deferreturn，直到 g 上的 defer 链表为空，deferreturn 函数 return
 	jmpdefer(fn, uintptr(unsafe.Pointer(&arg0)))
 }
 
@@ -911,6 +924,7 @@ func gopanic(e interface{}) {
 
 	var p _panic
 	p.arg = e
+	// 放到 g 的 panic 链表头上 , 后进先出
 	p.link = gp._panic
 	gp._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
 
@@ -929,11 +943,14 @@ func gopanic(e interface{}) {
 		// If defer was started by earlier panic or Goexit (and, since we're back here, that triggered a new panic),
 		// take defer off list. An earlier panic will not continue running, but we will make sure below that an
 		// earlier Goexit does continue running.
+		// 如果defer是由较早的 panic 或Goexit启动的（并且由于我们回到这里，则引发了新的 panic ），则将defer从列表中删除。 较早的 panic 将不会继续运行，但是我们将在下面确保较早的Goexit确实会继续运行。
 		if d.started {
 			if d._panic != nil {
+				// 标识 panic
 				d._panic.aborted = true
 			}
 			d._panic = nil
+			// 防止 panic->g.defer->g.defer.fn->panic->g.defer->g.defer.fn->panic 死循环
 			if !d.openDefer {
 				// For open-coded defers, we need to process the
 				// defer again, in case there are any other defers
@@ -954,6 +971,7 @@ func gopanic(e interface{}) {
 		// Record the panic that is running the defer.
 		// If there is a new panic during the deferred call, that panic
 		// will find d in the list and will mark d._panic (this panic) aborted.
+		// 把 panic 赋值给 defer, 假如 defer 执行 fn 时也 panic 了，因为上面 d.started = true, 所以会进到 d._panic.aborted = true 这个逻辑里
 		d._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
 
 		done := true
@@ -964,6 +982,7 @@ func gopanic(e interface{}) {
 			}
 		} else {
 			p.argp = unsafe.Pointer(getargp(0))
+			// 执行 defer 的 fn 函数
 			reflectcall(nil, unsafe.Pointer(d.fn), deferArgs(d), uint32(d.siz), uint32(d.siz))
 		}
 		p.argp = nil
@@ -977,6 +996,7 @@ func gopanic(e interface{}) {
 		// trigger shrinkage to test stack copy. See stack_test.go:TestStackPanic
 		//GC()
 
+		// 移除 d
 		pc := d.pc
 		sp := unsafe.Pointer(d.sp) // must be pointer so it gets adjusted during stack copy
 		if done {
@@ -984,6 +1004,7 @@ func gopanic(e interface{}) {
 			gp._defer = d.link
 			freedefer(d)
 		}
+		// 如果被 recovered
 		if p.recovered {
 			gp._panic = p.link
 			if gp._panic != nil && gp._panic.goexit && gp._panic.aborted {
@@ -1004,6 +1025,7 @@ func gopanic(e interface{}) {
 				// normally.
 				d := gp._defer
 				var prev *_defer
+				// 换下一个 defer
 				for d != nil {
 					if d.openDefer {
 						if d.started {
@@ -1031,6 +1053,7 @@ func gopanic(e interface{}) {
 			gp._panic = p.link
 			// Aborted panics are marked but remain on the g.panic list.
 			// Remove them from the list.
+			// 下一个 panic 不为空，但是标识为 true, 移除掉, 不处理
 			for gp._panic != nil && gp._panic.aborted {
 				gp._panic = gp._panic.link
 			}
@@ -1040,6 +1063,8 @@ func gopanic(e interface{}) {
 			// Pass information about recovering frame to recovery.
 			gp.sigcode0 = uintptr(sp)
 			gp.sigcode1 = pc
+			// 继续执行当前 g，也就是执行 deferreturn ,此时 g 的 defer 链表里只剩下 recover 对应的 defer 了，于是会执行 gorecover
+			// 并且把 p.arg 返回
 			mcall(recovery)
 			throw("recovery failed") // mcall should not return
 		}
