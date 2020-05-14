@@ -781,8 +781,10 @@ func (cr *connReader) Read(p []byte) (n int, err error) {
 		cr.unlock()
 		return 1, nil
 	}
+	// 设置读标志
 	cr.inRead = true
 	cr.unlock()
+	// 调用真正的读操作
 	n, err = cr.conn.rwc.Read(p)
 
 	cr.lock()
@@ -950,6 +952,7 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 	if d := c.server.ReadTimeout; d != 0 {
 		wholeReqDeadline = t0.Add(d)
 	}
+	// 设置 deadline， 加一个 timer 进调度，到时间了找阻塞的 g ，并且准备执行它
 	c.rwc.SetReadDeadline(hdrDeadline)
 	if d := c.server.WriteTimeout; d != 0 {
 		defer func() {
@@ -1778,6 +1781,7 @@ func (c *conn) serve(ctx context.Context) {
 		}
 	}()
 
+	// https
 	if tlsConn, ok := c.rwc.(*tls.Conn); ok {
 		if d := c.server.ReadTimeout; d != 0 {
 			c.rwc.SetReadDeadline(time.Now().Add(d))
@@ -1819,6 +1823,7 @@ func (c *conn) serve(ctx context.Context) {
 	c.bufw = newBufioWriterSize(checkConnErrorWriter{c}, 4<<10)
 
 	for {
+		// 读套接字里的数据，包装成 request
 		w, err := c.readRequest(ctx)
 		if c.r.remain != c.server.initialReadLimitSize() {
 			// If we read any bytes off the wire, we're active.
@@ -1892,6 +1897,7 @@ func (c *conn) serve(ctx context.Context) {
 		// in parallel even if their responses need to be serialized.
 		// But we're not going to implement HTTP pipelining because it
 		// was never deployed in the wild and the answer is HTTP/2.
+		// 处理请求，并且把结果写入套接字
 		serverHandler{c.server}.ServeHTTP(w, w.req)
 		w.cancelCtx()
 		if c.hijacked() {
@@ -2823,6 +2829,7 @@ func (srv *Server) ListenAndServe() error {
 	if addr == "" {
 		addr = ":http"
 	}
+	// 新建一个套接字，并且启动 epoll,并且加入到 epoll 里去
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -2877,10 +2884,12 @@ func (srv *Server) Serve(l net.Listener) error {
 	l = &onceCloseListener{Listener: l}
 	defer l.Close()
 
+	// 设置 http2 serve
 	if err := srv.setupHTTP2_Serve(); err != nil {
 		return err
 	}
 
+	// 把 Listener 加入到 listeners
 	if !srv.trackListener(&l, true) {
 		return ErrServerClosed
 	}
@@ -2898,8 +2907,10 @@ func (srv *Server) Serve(l net.Listener) error {
 
 	ctx := context.WithValue(baseCtx, ServerContextKey, srv)
 	for {
+		// 有新的套接字就获取并且包装成 Conn 返回，没有就 park
 		rw, err := l.Accept()
 		if err != nil {
+			// 是否关闭
 			select {
 			case <-srv.getDoneChan():
 				return ErrServerClosed
@@ -2927,6 +2938,7 @@ func (srv *Server) Serve(l net.Listener) error {
 			}
 		}
 		tempDelay = 0
+		// 再包装一下
 		c := srv.newConn(rw)
 		c.setState(c.rwc, StateNew) // before Serve can return
 		go c.serve(ctx)

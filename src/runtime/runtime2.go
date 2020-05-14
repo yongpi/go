@@ -132,6 +132,7 @@ const (
 	// transitioning its state. Its run queue is empty.
 	// p 没有被使用或调度，在空闲 p 的列表里等待被调用。
 	// 或者是其他状态转换的中间态，运行队列为空
+	// 比如 清空 p 和 m 的关系，在 p 和 m 绑定之前就是这个状态，绑定之后就变成 running
 	_Pidle = iota
 
 	// _Prunning means a P is owned by an M and is being used to
@@ -176,6 +177,7 @@ const (
 	// 意味着 p 因为 STW 被停止，被拥有的 m 停止。STW 的 m 继续使用 p，
 	// 即使 p 处在 _Pgcstop 状态，从 _Prunning 变成 _Pgcstop 因为 m 对 p 的释放和阻塞
 	// p 保留自己的运行队列，start the world 将会重新调度非空运行队列的 p
+	// 2、p 初始化或者调整 p 大小的时候也是这个状态
 	_Pgcstop
 
 	// _Pdead means a P is no longer used (GOMAXPROCS shrank). We
@@ -233,6 +235,7 @@ type note struct {
 	key uintptr
 }
 
+// 可变长度，会把 fn 具体的参数也放到这个结构体里
 type funcval struct {
 	fn uintptr
 	// variable-size, fn-specific data here
@@ -480,7 +483,7 @@ type g struct {
 	// pointing into this goroutine's stack. If true, stack
 	// copying needs to acquire channel locks to protect these
 	// areas of the stack.
-	activeStackChans bool
+	activeStackChans bool  // 被channel 锁住
 
 	raceignore     int8     // ignore race detection events
 	sysblocktraced bool     // StartTrace has emitted EvGoInSyscall about this goroutine
@@ -539,7 +542,7 @@ type m struct {
 	locks         int32
 	dying         int32
 	profilehz     int32
-	spinning      bool // m is out of work and is actively looking for work  m 不在工作中并且正在积极的找工作
+	spinning      bool // m is out of work and is actively looking for work  m 不在工作中并且正在积极的找工作, 就是说明在偷啊，在积极的偷别人家的 g
 	blocked       bool // m is blocked on a note  被在 note 上阻塞的标志
 	newSigstack   bool // minit on C thread called sigaltstack
 	printlock     int8
@@ -596,7 +599,7 @@ type p struct {
 	status      uint32 // one of pidle/prunning/...
 	link        puintptr // 执行下一个空闲的 p
 	schedtick   uint32     // incremented on every scheduler call  每一个调度调用都增加
-	syscalltick uint32     // incremented on every system call
+	syscalltick uint32     // incremented on every system call  每次系统调用都新增
 	sysmontick  sysmontick // last tick observed by sysmon   被 sysmon 观察到的最后的 tick
 	m           muintptr   // back-link to associated m (nil if idle)
 	mcache      *mcache

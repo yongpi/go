@@ -21,6 +21,8 @@ func accept(s int) (int, syscall.Sockaddr, string, error) {
 	// because we have put fd.sysfd into non-blocking mode.
 	// However, a call to the File method will put it back into
 	// blocking mode. We can't take that risk, so no use of ForkLock here.
+
+	// accept
 	ns, sa, err := AcceptFunc(s)
 	if err == nil {
 		syscall.CloseOnExec(ns)
@@ -28,6 +30,7 @@ func accept(s int) (int, syscall.Sockaddr, string, error) {
 	if err != nil {
 		return -1, nil, "accept", err
 	}
+	// 设置成非阻塞
 	if err = syscall.SetNonblock(ns, true); err != nil {
 		CloseFunc(ns)
 		return -1, nil, "setnonblock", err

@@ -356,6 +356,7 @@ func addInitializedTimer(t *timer) {
 // doaddtimer adds t to the current P's heap.
 // It reports whether it saw no problems due to races.
 // The caller must have locked the timers for pp.
+// 添加定时器到 p ，并且调整定时器
 func doaddtimer(pp *p, t *timer) bool {
 	// Timers rely on the network poller, so make sure the poller
 	// has started.
@@ -366,6 +367,7 @@ func doaddtimer(pp *p, t *timer) bool {
 	if t.pp != 0 {
 		throw("doaddtimer: P already set in timer")
 	}
+	// 设置 timer 的 p
 	t.pp.set(pp)
 	i := len(pp.timers)
 	pp.timers = append(pp.timers, t)
@@ -473,12 +475,14 @@ func dodeltimer(pp *p, i int) bool {
 		t.pp = 0
 	}
 	last := len(pp.timers) - 1
+	// 把最后一个 timer 放在 i 处
 	if i != last {
 		pp.timers[i] = pp.timers[last]
 	}
 	pp.timers[last] = nil
 	pp.timers = pp.timers[:last]
 	ok := true
+	// 然后再调整
 	if i != last {
 		// Moving to i may have moved the last timer to a new parent,
 		// so sift up to preserve the heap guarantee.
@@ -879,14 +883,17 @@ func moveTimers(pp *p, timers []*timer) {
 				}
 				break loop
 			case timerModifiedEarlier, timerModifiedLater:
+				// 先把状态设置为 moving
 				if !atomic.Cas(&t.status, s, timerMoving) {
 					continue
 				}
 				t.when = t.nextwhen
 				t.pp = 0
+				// 加入到 p
 				if !doaddtimer(pp, t) {
 					badTimer()
 				}
+				// 再把状态改成 waiting
 				if !atomic.Cas(&t.status, timerMoving, timerWaiting) {
 					badTimer()
 				}
@@ -1042,6 +1049,7 @@ func runtimer(pp *p, now int64) int64 {
 		switch s := atomic.Load(&t.status); s {
 		// 等待执行的 timer
 		case timerWaiting:
+			// 还没到时间
 			if t.when > now {
 				// Not ready to run.
 				return t.when

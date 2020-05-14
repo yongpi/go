@@ -1022,6 +1022,7 @@ func newstack() {
 		}
 
 		// Act like goroutine called runtime.Gosched.
+		// 把当前 g 改为 _Grunnable，去除和 m 的关系，并且丢到全局队列里，然后重新调度
 		gopreempt_m(gp) // never return
 	}
 

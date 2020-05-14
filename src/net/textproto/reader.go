@@ -64,6 +64,7 @@ func (r *Reader) readLineSlice() ([]byte, error) {
 			return l, nil
 		}
 		line = append(line, l...)
+		// 解决 readline 4096 长度限制
 		if !more {
 			break
 		}

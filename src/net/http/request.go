@@ -1015,6 +1015,7 @@ func readRequest(b *bufio.Reader, deleteHostHeader bool) (req *Request, err erro
 	if s, err = tp.ReadLine(); err != nil {
 		return nil, err
 	}
+	// 放回池子里去
 	defer func() {
 		putTextprotoReader(tp)
 		if err == io.EOF {
@@ -1084,6 +1085,7 @@ func readRequest(b *bufio.Reader, deleteHostHeader bool) (req *Request, err erro
 
 	req.Close = shouldClose(req.ProtoMajor, req.ProtoMinor, req.Header, false)
 
+	// 封装一下
 	err = readTransfer(req, b)
 	if err != nil {
 		return nil, err

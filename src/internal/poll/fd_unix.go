@@ -15,6 +15,7 @@ import (
 
 // FD is a file descriptor. The net and os packages use this type as a
 // field of a larger type representing a network connection or OS file.
+// 文件描述符，被 net 包用作网络连接，或者被 os 包当做 os file
 type FD struct {
 	// Lock sysfd and serialize access to Read and Write methods.
 	fdmu fdMutex
@@ -60,6 +61,7 @@ func (fd *FD) Init(net string, pollable bool) error {
 		fd.isBlocking = 1
 		return nil
 	}
+	// 初始化 epoll,并把当前文件描述符加入到 epoll
 	err := fd.pd.init(fd)
 	if err != nil {
 		// If we could not initialize the runtime poller,
@@ -155,6 +157,7 @@ func (fd *FD) Read(p []byte) (int, error) {
 		// TODO(bradfitz): make it wait for readability? (Issue 15735)
 		return 0, nil
 	}
+	// 读之前的检查
 	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, err
 	}
@@ -165,6 +168,7 @@ func (fd *FD) Read(p []byte) (int, error) {
 		n, err := syscall.Read(fd.Sysfd, p)
 		if err != nil {
 			n = 0
+			// 等待
 			if err == syscall.EAGAIN && fd.pd.pollable() {
 				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
@@ -370,17 +374,21 @@ func (fd *FD) Accept() (int, syscall.Sockaddr, string, error) {
 	}
 	defer fd.readUnlock()
 
+	// 是否可以读
 	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return -1, nil, "", err
 	}
 	for {
+		// 获取一个非阻塞的套接字对应的文件描述符
 		s, rsa, errcall, err := accept(fd.Sysfd)
 		if err == nil {
 			return s, rsa, "", err
 		}
 		switch err {
+		// 没有能读的
 		case syscall.EAGAIN:
 			if fd.pd.pollable() {
+				// 等待读, park 住，这里 park 住的是监听套接字对应的 g, 在调度中唤醒
 				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}

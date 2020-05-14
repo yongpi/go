@@ -243,10 +243,12 @@ func (fd *netFD) accept() (netfd *netFD, err error) {
 		return nil, err
 	}
 
+	// 把 accept 获取的文件描述符包装成网络文件描述符
 	if netfd, err = newFD(d, fd.family, fd.sotype, fd.net); err != nil {
 		poll.CloseFunc(d)
 		return nil, err
 	}
+	// 加到 epoll 里
 	if err = netfd.init(); err != nil {
 		netfd.Close()
 		return nil, err

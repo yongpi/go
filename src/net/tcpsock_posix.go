@@ -136,10 +136,12 @@ func spuriousENOTAVAIL(err error) bool {
 func (ln *TCPListener) ok() bool { return ln != nil && ln.fd != nil }
 
 func (ln *TCPListener) accept() (*TCPConn, error) {
+	// 获取一个网络文件描述符
 	fd, err := ln.fd.accept()
 	if err != nil {
 		return nil, err
 	}
+	// 新建一个 tcp 链接
 	tc := newTCPConn(fd)
 	if ln.lc.KeepAlive >= 0 {
 		setKeepAlive(fd, true)
@@ -147,6 +149,7 @@ func (ln *TCPListener) accept() (*TCPConn, error) {
 		if ln.lc.KeepAlive == 0 {
 			ka = defaultTCPKeepAlive
 		}
+		// 设置 Keep Alive
 		setKeepAlivePeriod(fd, ka)
 	}
 	return tc, nil

@@ -31,14 +31,14 @@ const (
 
 type hchan struct {
 	qcount   uint           // total data in the queue
-	dataqsiz uint           // size of the circular queue
-	buf      unsafe.Pointer // points to an array of dataqsiz elements
+	dataqsiz uint           // size of the circular queue 队列大小，不会变
+	buf      unsafe.Pointer // points to an array of dataqsiz elements 指向dataqsiz元素数组
 	elemsize uint16
 	closed   uint32
 	elemtype *_type // element type
 	sendx    uint   // send index
 	recvx    uint   // receive index
-	recvq    waitq  // list of recv waiters
+	recvq    waitq  // list of recv waiters  recv 队列
 	sendq    waitq  // list of send waiters
 
 	// lock protects all fields in hchan, as well as several
@@ -125,9 +125,12 @@ func chanbuf(c *hchan, i uint) unsafe.Pointer {
 // It uses a single word-sized read of mutable state, so although
 // the answer is instantaneously true, the correct answer may have changed
 // by the time the calling function receives the return value.
+// 发送是否阻塞（channel 是否 full）
+// 有可能会发生瞬时变化，因为下一刻有可能就会有消费者或者生产者
 func full(c *hchan) bool {
 	// c.dataqsiz is immutable (never written after the channel is created)
 	// so it is safe to read at any time during channel operation.
+	// 队列大小为零,并且没有接受的 g
 	if c.dataqsiz == 0 {
 		// Assumes that a pointer read is relaxed-atomic.
 		return c.recvq.first == nil
@@ -159,6 +162,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		if !block {
 			return false
 		}
+		// chan 如果是 nil，会一直阻塞下去，除非 close， close 会导致 panic
 		gopark(nil, nil, waitReasonChanSendNilChan, traceEvGoStop, 2)
 		throw("unreachable")
 	}
@@ -198,11 +202,12 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 
 	lock(&c.lock)
 
+	// channel 已经被 close 了
 	if c.closed != 0 {
 		unlock(&c.lock)
 		panic(plainError("send on closed channel"))
 	}
-
+	// 接收队列有等待的 sudog
 	if sg := c.recvq.dequeue(); sg != nil {
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
@@ -210,15 +215,19 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		return true
 	}
 
+	// 有缓存的 channel，并且缓存没满
 	if c.qcount < c.dataqsiz {
 		// Space is available in the channel buffer. Enqueue the element to send.
+		// 获取数组元素指针
 		qp := chanbuf(c, c.sendx)
 		if raceenabled {
 			raceacquire(qp)
 			racerelease(qp)
 		}
+		// 赋值,放在 channel 的缓存 buf 数组里
 		typedmemmove(c.elemtype, qp, ep)
 		c.sendx++
+		// 数组索引到头了
 		if c.sendx == c.dataqsiz {
 			c.sendx = 0
 		}
@@ -233,6 +242,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	}
 
 	// Block on the channel. Some receiver will complete our operation for us.
+	// 向 channel 中发送数据的 g 和 对应的sudog
 	gp := getg()
 	mysg := acquireSudog()
 	mysg.releasetime = 0
@@ -241,14 +251,17 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	}
 	// No stack splits between assigning elem and enqueuing mysg
 	// on gp.waiting where copystack can find it.
-	mysg.elem = ep
+	mysg.elem = ep // 发送的值存在这里
 	mysg.waitlink = nil
 	mysg.g = gp
 	mysg.isSelect = false
 	mysg.c = c
-	gp.waiting = mysg
+	gp.waiting = mysg // 这个时候赋值了，下面要用来判断
 	gp.param = nil
+	// sudog 入 send 队列
 	c.sendq.enqueue(mysg)
+	// 阻塞 g
+	// 顺道把 c.lock 给 unlock 了
 	gopark(chanparkcommit, unsafe.Pointer(&c.lock), waitReasonChanSend, traceEvGoBlockSend, 2)
 	// Ensure the value being sent is kept alive until the
 	// receiver copies it out. The sudog has a pointer to the
@@ -262,6 +275,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	}
 	gp.waiting = nil
 	gp.activeStackChans = false
+	// 关闭 channel 的时候会 gp.param = nil,所以此处会 panic
 	if gp.param == nil {
 		if c.closed == 0 {
 			throw("chansend: spurious wakeup")
@@ -303,8 +317,10 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 			c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
 		}
 	}
+	// 赋值
 	if sg.elem != nil {
 		sendDirect(c.elemtype, sg, ep)
+		// 清除 sudog 和接收变量之间的联系
 		sg.elem = nil
 	}
 	gp := sg.g
@@ -313,6 +329,7 @@ func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+	// 唤醒 g
 	goready(gp, skip+1)
 }
 
@@ -370,11 +387,14 @@ func closechan(c *hchan) {
 	var glist gList
 
 	// release all readers
+	// 没啥可说的，就是把所有等待的读和写的 sudog 对应的 g 释放，并且把 gp.param 置为 nil ,用来当做 close 的标志
 	for {
+		// 所有等待接收的 sudog
 		sg := c.recvq.dequeue()
 		if sg == nil {
 			break
 		}
+		// sg.elem
 		if sg.elem != nil {
 			typedmemclr(c.elemtype, sg.elem)
 			sg.elem = nil
@@ -453,6 +473,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		print("chanrecv: chan=", c, "\n")
 	}
 
+	// channel 为 nil，接收会永久阻塞
 	if c == nil {
 		if !block {
 			return
@@ -472,6 +493,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		// we use atomic loads for both checks, and rely on emptying and closing to happen in
 		// separate critical sections under the same lock.  This assumption fails when closing
 		// an unbuffered channel with a blocked send, but that is an error condition anyway.
+		// channel 没有关闭
 		if atomic.Load(&c.closed) == 0 {
 			// Because a channel cannot be reopened, the later observation of the channel
 			// being not closed implies that it was also not closed at the moment of the
@@ -482,9 +504,11 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		// The channel is irreversibly closed. Re-check whether the channel has any pending data
 		// to receive, which could have arrived between the empty and closed checks above.
 		// Sequential consistency is also required here, when racing with such a send.
+		// channel 已经关闭了
 		if empty(c) {
 			// The channel is irreversibly closed and empty.
 			if ep != nil {
+				// 清空 ep 的值
 				typedmemclr(c.elemtype, ep)
 			}
 			return true, false
@@ -498,17 +522,21 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 
 	lock(&c.lock)
 
+	// channel 被 close 了，并且没有内容了
+	// 和上面的逻辑加一起来一起看会发现，如果 channel 被 close 了，<-channel 永远不会阻塞
 	if c.closed != 0 && c.qcount == 0 {
 		if raceenabled {
 			raceacquire(c.raceaddr())
 		}
 		unlock(&c.lock)
 		if ep != nil {
+			// 清空 ep
 			typedmemclr(c.elemtype, ep)
 		}
 		return true, false
 	}
 
+	// 存在等待发送的 sudog
 	if sg := c.sendq.dequeue(); sg != nil {
 		// Found a waiting sender. If buffer is size 0, receive value
 		// directly from sender. Otherwise, receive from head of queue
@@ -518,6 +546,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		return true, true
 	}
 
+	// 没有等待发送的 sudog，并且存在缓存值,直接取值赋值
 	if c.qcount > 0 {
 		// Receive directly from queue
 		qp := chanbuf(c, c.recvx)
@@ -525,9 +554,11 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 			raceacquire(qp)
 			racerelease(qp)
 		}
+		// 赋值给 ep
 		if ep != nil {
 			typedmemmove(c.elemtype, ep, qp)
 		}
+		// 清空 qp
 		typedmemclr(c.elemtype, qp)
 		c.recvx++
 		if c.recvx == c.dataqsiz {
@@ -544,6 +575,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	}
 
 	// no sender available: block on this channel.
+	// 既没有缓冲区，也没有等待发送的队列
 	gp := getg()
 	mysg := acquireSudog()
 	mysg.releasetime = 0
@@ -559,7 +591,9 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	mysg.isSelect = false
 	mysg.c = c
 	gp.param = nil
+	// 放到等待接收的队列里取
 	c.recvq.enqueue(mysg)
+	// 阻塞
 	gopark(chanparkcommit, unsafe.Pointer(&c.lock), waitReasonChanReceive, traceEvGoBlockRecv, 2)
 
 	// someone woke us up
@@ -571,6 +605,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	if mysg.releasetime > 0 {
 		blockevent(mysg.releasetime-t0, 2)
 	}
+	// channel 是否被关闭
 	closed := gp.param == nil
 	gp.param = nil
 	mysg.c = nil
@@ -592,12 +627,14 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 // sg must already be dequeued from c.
 // A non-nil ep must point to the heap or the caller's stack.
 func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
+	// 无缓冲区
 	if c.dataqsiz == 0 {
 		if raceenabled {
 			racesync(c, sg)
 		}
 		if ep != nil {
 			// copy data from sender
+			// 直接拷贝数据到 ep
 			recvDirect(c.elemtype, sg, ep)
 		}
 	} else {
@@ -605,6 +642,8 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 		// head of the queue. Make the sender enqueue
 		// its item at the tail of the queue. Since the
 		// queue is full, those are both the same slot.
+		// 有缓冲区，还有等待队列，说明缓冲区已经满了
+		// 从 channel buf 中取数据
 		qp := chanbuf(c, c.recvx)
 		if raceenabled {
 			raceacquire(qp)
@@ -613,24 +652,32 @@ func recv(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 			racereleaseg(sg.g, qp)
 		}
 		// copy data from queue to receiver
+		// 赋值给 ep
 		if ep != nil {
 			typedmemmove(c.elemtype, ep, qp)
 		}
 		// copy data from sender to queue
+		// 把等待的 sudog 的值放进缓存数组 （取出老的放进新的）
+		// 为啥要这样呢，因为现在存在等待队列，刚才从已满的缓冲区中移除了一个赋值给 ep了，这个时候就把
+		// 等待队列中的值放到缓冲区中
 		typedmemmove(c.elemtype, qp, sg.elem)
 		c.recvx++
 		if c.recvx == c.dataqsiz {
 			c.recvx = 0
 		}
+		// 这个不知道为啥，下次往缓冲区里放东西从这次拿的索引开始吗？貌似也可以啊
 		c.sendx = c.recvx // c.sendx = (c.sendx+1) % c.dataqsiz
 	}
+	// 清空
 	sg.elem = nil
 	gp := sg.g
 	unlockf()
+	// 把 sudog 放到 g 的 param 里
 	gp.param = unsafe.Pointer(sg)
 	if sg.releasetime != 0 {
 		sg.releasetime = cputicks()
 	}
+	// 唤醒 g
 	goready(gp, skip+1)
 }
 
@@ -763,10 +810,12 @@ func (q *waitq) enqueue(sgp *sudog) {
 
 func (q *waitq) dequeue() *sudog {
 	for {
+		// 取出第一个 sudog
 		sgp := q.first
 		if sgp == nil {
 			return nil
 		}
+		// 移除第一个 sudog
 		y := sgp.next
 		if y == nil {
 			q.first = nil

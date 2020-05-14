@@ -44,6 +44,7 @@ func selectsetpc(cas *scase) {
 
 func sellock(scases []scase, lockorder []uint16) {
 	var c *hchan
+	// lockorder 对应的值对应的 case 中的 channel 是有序的
 	for _, o := range lockorder {
 		c0 := scases[o].c
 		if c0 != nil && c0 != c {
@@ -120,15 +121,19 @@ func selectgo(cas0 *scase, order0 *uint16, ncases int) (int, bool) {
 		print("select: cas0=", cas0, "\n")
 	}
 
+	// 转换成数组
 	cas1 := (*[1 << 16]scase)(unsafe.Pointer(cas0))
 	order1 := (*[1 << 17]uint16)(unsafe.Pointer(order0))
 
+	// 切成 slice
 	scases := cas1[:ncases:ncases]
 	pollorder := order1[:ncases:ncases]
+	// 加锁顺序
 	lockorder := order1[ncases:][:ncases:ncases]
 
 	// Replace send/receive cases involving nil channels with
 	// caseNil so logic below can assume non-nil channel.
+	// 转换 channel 为 nil 的 case
 	for i := range scases {
 		cas := &scases[i]
 		if cas.c == nil && cas.kind != caseDefault {
@@ -153,6 +158,7 @@ func selectgo(cas0 *scase, order0 *uint16, ncases int) (int, bool) {
 	// optimizing (and needing to test).
 
 	// generate permuted order
+	// 打乱顺序
 	for i := 1; i < ncases; i++ {
 		j := fastrandn(uint32(i + 1))
 		pollorder[i] = pollorder[j]
@@ -161,6 +167,7 @@ func selectgo(cas0 *scase, order0 *uint16, ncases int) (int, bool) {
 
 	// sort the cases by Hchan address to get the locking order.
 	// simple heap sort, to guarantee n log n time and constant stack footprint.
+	// 下面这一段代码 大概就是打乱 case，并且lockorder里的值按照 channel 排序，相同的 channel 就会相邻
 	for i := 0; i < ncases; i++ {
 		j := i
 		// Start with the pollorder to permute cases on the same channel.
@@ -205,6 +212,7 @@ func selectgo(cas0 *scase, order0 *uint16, ncases int) (int, bool) {
 	}
 
 	// lock all the channels involved in the select
+	// 所有的channel 都锁， 相同 channel 只锁一次
 	sellock(scases, lockorder)
 
 	var (
@@ -225,8 +233,10 @@ loop:
 	var casi int
 	var cas *scase
 	var recvOK bool
+	// 循环来了
 	for i := 0; i < ncases; i++ {
 		casi = int(pollorder[i])
+		// 乱序
 		cas = &scases[casi]
 		c = cas.c
 
@@ -266,7 +276,7 @@ loop:
 			dfl = cas
 		}
 	}
-
+	 // 循环结束，发现有 default
 	if dfl != nil {
 		selunlock(scases, lockorder)
 		casi = dfli
@@ -287,6 +297,7 @@ loop:
 			continue
 		}
 		c = cas.c
+		// 获取一个 sudog
 		sg := acquireSudog()
 		sg.g = gp
 		sg.isSelect = true
@@ -302,6 +313,7 @@ loop:
 		*nextp = sg
 		nextp = &sg.waitlink
 
+		// 加到对应的读取队列或者发送队列中去
 		switch cas.kind {
 		case caseRecv:
 			c.recvq.enqueue(sg)
@@ -326,6 +338,7 @@ loop:
 	// otherwise they stack up on quiet channels
 	// record the successful case, if any.
 	// We singly-linked up the SudoGs in lock order.
+	// 唤醒之后清除各个 channel 等待队列里的值
 	casi = -1
 	cas = nil
 	sglist = gp.waiting
@@ -451,6 +464,7 @@ bufsend:
 
 recv:
 	// can receive from sleeping sender (sg)
+	// 注意！！！ 函数里是解锁所有的 channel lock
 	recv(c, sg, cas.elem, func() { selunlock(scases, lockorder) }, 2)
 	if debugSelect {
 		print("syncrecv: cas0=", cas0, " c=", c, "\n")
@@ -520,6 +534,7 @@ const (
 )
 
 //go:linkname reflect_rselect reflect.rselect
+// select 的实现
 func reflect_rselect(cases []runtimeSelect) (int, bool) {
 	if len(cases) == 0 {
 		block()

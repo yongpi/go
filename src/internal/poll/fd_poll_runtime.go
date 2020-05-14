@@ -18,6 +18,7 @@ import (
 //go:linkname runtimeNano runtime.nanotime
 func runtimeNano() int64
 
+// runtime包 poll_runtime_pollServerInit
 func runtime_pollServerInit()
 func runtime_pollOpen(fd uintptr) (uintptr, int)
 func runtime_pollClose(ctx uintptr)
@@ -35,7 +36,9 @@ type pollDesc struct {
 var serverInit sync.Once
 
 func (pd *pollDesc) init(fd *FD) error {
+	// 初始化 poll server (比如 epoll) 只初始化一次
 	serverInit.Do(runtime_pollServerInit)
+	// 注册到 epoll 中
 	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))
 	if errno != 0 {
 		if ctx != 0 {
@@ -44,6 +47,7 @@ func (pd *pollDesc) init(fd *FD) error {
 		}
 		return errnoErr(syscall.Errno(errno))
 	}
+	// 把初始化完成的 pollDesc 赋值给 runtimeCtx
 	pd.runtimeCtx = ctx
 	return nil
 }

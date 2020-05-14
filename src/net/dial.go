@@ -219,6 +219,7 @@ func (r *Resolver) resolveAddrList(ctx context.Context, op, network, addr string
 		}
 		return addrList{addr}, nil
 	}
+	// 解析获取地址信息
 	addrs, err := r.internetAddrList(ctx, afnet, addr)
 	if err != nil || op != "dial" || hint == nil {
 		return addrs, err

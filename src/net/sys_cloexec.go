@@ -20,6 +20,7 @@ import (
 func sysSocket(family, sotype, proto int) (int, error) {
 	// See ../syscall/exec_unix.go for description of ForkLock.
 	syscall.ForkLock.RLock()
+	// 创建一个套接字
 	s, err := socketFunc(family, sotype, proto)
 	if err == nil {
 		syscall.CloseOnExec(s)
@@ -28,6 +29,7 @@ func sysSocket(family, sotype, proto int) (int, error) {
 	if err != nil {
 		return -1, os.NewSyscallError("socket", err)
 	}
+	// 设置套接字为非阻塞
 	if err = syscall.SetNonblock(s, true); err != nil {
 		poll.CloseFunc(s)
 		return -1, os.NewSyscallError("setnonblock", err)

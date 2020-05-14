@@ -116,6 +116,7 @@ func netpoll(delay int64) gList {
 	}
 	var events [128]epollevent
 retry:
+	// 对应 epoll_wait 函数
 	n := epollwait(epfd, &events[0], int32(len(events)), waitms)
 	if n < 0 {
 		if n != -_EINTR {
@@ -164,6 +165,7 @@ retry:
 			if ev.events == _EPOLLERR {
 				pd.everr = true
 			}
+			// 取出等待的 g 放到 toRun 里
 			netpollready(&toRun, pd, mode)
 		}
 	}

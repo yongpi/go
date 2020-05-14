@@ -370,6 +370,7 @@ var listenerBacklogCache struct {
 }
 
 // listenerBacklog is a caching wrapper around maxListenerBacklog.
+// 监听队列的大小 https://www.freebsd.org/doc/zh_CN/books/handbook/configtuning-kernel-limits.html
 func listenerBacklog() int {
 	listenerBacklogCache.Do(func() { listenerBacklogCache.val = maxListenerBacklog() })
 	return listenerBacklogCache.val
