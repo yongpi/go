@@ -325,8 +325,7 @@ type MemStats struct {
 	// GCSys is bytes of memory in garbage collection metadata.
 	GCSys uint64
 
-	// OtherSys is bytes of memory in miscellaneous off-heap
-	// runtime allocations.
+	// OtherSys is bytes of memory in miscellaneous off-heap runtime allocations.
 	OtherSys uint64
 
 	// Garbage collector statistics.

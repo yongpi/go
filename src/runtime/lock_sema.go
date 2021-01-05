@@ -44,6 +44,7 @@ func lock(l *mutex) {
 	if atomic.Casuintptr(&l.key, 0, locked) {
 		return
 	}
+	// 初始化 互斥锁和 cond
 	semacreate(gp.m)
 
 	// On uniprocessor's, no point spinning.

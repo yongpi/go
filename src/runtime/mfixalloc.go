@@ -24,6 +24,7 @@ import "unsafe"
 // smashed by freeing and reallocating.
 //
 // Consider marking fixalloc'd types go:notinheap.
+// 从操作系统中直接申请内存
 type fixalloc struct {
 	size   uintptr
 	first  func(arg, p unsafe.Pointer) // called first time p is returned
@@ -32,7 +33,7 @@ type fixalloc struct {
 	chunk  uintptr // use uintptr instead of unsafe.Pointer to avoid write barriers
 	nchunk uint32
 	inuse  uintptr // in-use bytes now
-	stat   *uint64
+	stat   *uint64 // 会在分配的时候改变
 	zero   bool // zero allocations
 }
 
@@ -61,6 +62,7 @@ func (f *fixalloc) init(size uintptr, first func(arg, p unsafe.Pointer), arg uns
 	f.zero = true
 }
 
+// 从操作系统直接申请内存，不在 go 堆中申请
 func (f *fixalloc) alloc() unsafe.Pointer {
 	if f.size == 0 {
 		print("runtime: use of FixAlloc_Alloc before FixAlloc_Init\n")
@@ -77,16 +79,22 @@ func (f *fixalloc) alloc() unsafe.Pointer {
 		return v
 	}
 	if uintptr(f.nchunk) < f.size {
+		// 申请操作系统分配内存块（堆外内存）, 每次申请 _FixAllocChunk 这么大
 		f.chunk = uintptr(persistentalloc(_FixAllocChunk, 0, f.stat))
+		// 剩余大小
 		f.nchunk = _FixAllocChunk
 	}
 
+	// v f.chunk 的内存起始位置
 	v := unsafe.Pointer(f.chunk)
 	if f.first != nil {
 		f.first(f.arg, v)
 	}
+	// chunk 已经被用 size 大小了，内存起始位置前进 size 大小
 	f.chunk = f.chunk + f.size
+	// 剩余大小
 	f.nchunk -= uint32(f.size)
+	// 已使用大小
 	f.inuse += f.size
 	return v
 }

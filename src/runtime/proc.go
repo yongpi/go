@@ -562,8 +562,11 @@ func schedinit() {
 
 	tracebackinit()
 	moduledataverify()
+
+	// 内存初始化
 	stackinit()
 	mallocinit()
+
 	fastrandinit() // must run before mcommoninit
 	// 初始化 m0
 	mcommoninit(_g_.m)
@@ -5671,9 +5674,11 @@ func sync_runtime_canSpin(i int) bool {
 	// GOMAXPROCS>1 and there is at least one other running P and local runq is empty.
 	// As opposed to runtime mutex we don't do passive spinning here,
 	// because there can be work on global runq or on other Ps.
+	// 自旋超过了三次 || cpu 数小于等于 1 || cpu 核数小于等于 空闲的 p + 自旋的 m
 	if i >= active_spin || ncpu <= 1 || gomaxprocs <= int32(sched.npidle+sched.nmspinning)+1 {
 		return false
 	}
+	// 当前 p 的 g 队列不为空
 	if p := getg().m.p.ptr(); !runqempty(p) {
 		return false
 	}

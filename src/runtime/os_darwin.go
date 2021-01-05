@@ -69,6 +69,7 @@ func semasleep(ns int64) int32 {
 
 //go:nosplit
 func semawakeup(mp *m) {
+	// 可重入锁
 	pthread_mutex_lock(&mp.mutex)
 	mp.count++
 	if mp.count > 0 {

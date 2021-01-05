@@ -381,6 +381,7 @@ func convertAssignRows(dest, src interface{}, rows *Rows) error {
 		return nil
 	}
 
+	//  dest 不是基本的类型，并且实现了 Scanner
 	if scanner, ok := dest.(Scanner); ok {
 		return scanner.Scan(src)
 	}

@@ -56,6 +56,7 @@ func (c *Cond) Wait() {
 	c.L.Unlock()
 	// 插入到 notify 的链表，并且阻塞
 	runtime_notifyListWait(&c.notify, t)
+	// 唤醒之后继续抢锁
 	c.L.Lock()
 }
 

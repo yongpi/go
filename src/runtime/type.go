@@ -357,9 +357,9 @@ type imethod struct {
 }
 
 type interfacetype struct {
-	typ     _type
-	pkgpath name
-	mhdr    []imethod
+	typ     _type // interface 的类型
+	pkgpath name // 包信息
+	mhdr    []imethod // interface 的 method 抽象，不是实际的被实现的 method
 }
 
 type maptype struct {

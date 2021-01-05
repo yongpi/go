@@ -256,6 +256,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	// the code the compiler generates always
 	// checks the return value and jumps to the
 	// end of the function if deferproc returns != 0.
+	// 如果返回不是 0，会跳到函数末尾执行 deferreturn
 	return0()
 	// No code can go here - the C return register has
 	// been set and must not be clobbered.
@@ -1061,6 +1062,7 @@ func gopanic(e interface{}) {
 				gp.sig = 0
 			}
 			// Pass information about recovering frame to recovery.
+			// 这里的 sp  和  pc 是 defer 的
 			gp.sigcode0 = uintptr(sp)
 			gp.sigcode1 = pc
 			// 继续执行当前 g，也就是执行 deferreturn ,此时 g 的 defer 链表里只剩下 recover 对应的 defer 了，于是会执行 gorecover
@@ -1165,7 +1167,7 @@ func recovery(gp *g) {
 	gp.sched.sp = sp
 	gp.sched.pc = pc
 	gp.sched.lr = 0
-	gp.sched.ret = 1
+	gp.sched.ret = 1 // 返回 1， 因为 sp 和 pc 是 defer 的， 所以跳转回 deferproc，因为返回值为 1，所以跳到了 deferreturn
 	gogo(&gp.sched)
 }
 

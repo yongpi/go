@@ -193,7 +193,7 @@ const (
 // as fast as spin locks (just a few user-level instructions),
 // but on the contention path they sleep in the kernel.
 // A zeroed Mutex is unlocked (no need to initialize each lock).
-// 互斥锁，在无竞争条件下和自旋锁一样快，在竞争状态下，会在内核中sleep
+// 互斥锁，在无竞争条件下和自旋锁一样快，在竞争状态下，会在内核中sleep。
 // 零值的mutex 是 unlocked 状态，所以不需要初始化
 type mutex struct {
 	// Futex-based impl treats it as uint32 key,
@@ -241,14 +241,16 @@ type funcval struct {
 	// variable-size, fn-specific data here
 }
 
+// 包含 method 的 interface
 type iface struct {
 	tab  *itab
 	data unsafe.Pointer
 }
 
+// empty interface, 不包含 Method 的 interface
 type eface struct {
-	_type *_type
-	data  unsafe.Pointer
+	_type *_type // 类型信息
+	data  unsafe.Pointer // 指向的值
 }
 
 func efaceOf(ep *interface{}) *eface {
@@ -536,7 +538,7 @@ type m struct {
 	nextp         puintptr
 	oldp          puintptr // the p that was attached before executing a syscall
 	id            int64
-	mallocing     int32
+	mallocing     int32  // 正在分配内存时赋值 1
 	throwing      int32
 	preemptoff    string // if != "", keep curg running on this m
 	locks         int32
@@ -591,7 +593,7 @@ type m struct {
 
 	dlogPerM
 
-	mOS
+	mOS // 加锁解锁使
 }
 
 type p struct {
@@ -658,7 +660,7 @@ type p struct {
 	// swept and reclaimed by sweeping in the current sweep loop.
 	traceSwept, traceReclaimed uintptr
 
-	palloc persistentAlloc // per-P to avoid mutex
+	palloc persistentAlloc // per-P to avoid mutex  每个 p 独有的分配器
 
 	_ uint32 // Alignment for atomic fields below
 
@@ -833,7 +835,7 @@ type funcinl struct {
 	entry uintptr // entry of the real (the "outermost") frame.
 	name  string
 	file  string
-	line  int
+	line  intifa'ce
 }
 
 // layout of Itab known to compilers
@@ -841,11 +843,11 @@ type funcinl struct {
 // Needs to be in sync with
 // ../cmd/compile/internal/gc/reflect.go:/^func.dumptabs.
 type itab struct {
-	inter *interfacetype
-	_type *_type
+	inter *interfacetype // 接口静态类型, 接口的抽象表示，也就是静态的接口，不是实际的 struct
+	_type *_type // 实际类型
 	hash  uint32 // copy of _type.hash. Used for type switches.
 	_     [4]byte
-	fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
+	fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter. 接口实现的函数，跟接口类型保持一致
 }
 
 // Lock-free stack node.

@@ -12,14 +12,15 @@ import (
 // Per-thread (in Go, per-P) cache for small objects.
 // No locking needed because it is per-thread (per-P).
 //
-// mcaches are allocated from non-GC'd memory, so any heap pointers
-// must be specially handled.
-//
+// mcaches are allocated from non-GC'd memory,
+// so any heap pointers must be specially handled.
+// mcaches 不是从需要 GC 的内存中分配的（AKA：直接从操作系统中申请的内存）
+// 所以任何堆指针必须被特殊处理
 //go:notinheap
 type mcache struct {
 	// The following members are accessed on every malloc,
 	// so they are grouped here for better caching.
-	next_sample uintptr // trigger heap sample after allocating this many bytes
+	next_sample uintptr // trigger heap sample after allocating this many bytes  分配这么多字节后触发堆样本
 	local_scan  uintptr // bytes of scannable heap allocated
 
 	// Allocator cache for tiny objects w/o pointers.
@@ -32,8 +33,8 @@ type mcache struct {
 	// we handle it by clearing it in releaseAll during mark
 	// termination.
 	tiny             uintptr
-	tinyoffset       uintptr
-	local_tinyallocs uintptr // number of tiny allocs not counted in other stats
+	tinyoffset       uintptr // 微小对象内存位移量 （已经分配了多少内存）
+	local_tinyallocs uintptr // number of tiny allocs not counted in other stats  未在其他统计信息中计算的 tiny allocs 分配数量
 
 	// The rest is not accessed on every malloc.
 
@@ -46,10 +47,10 @@ type mcache struct {
 	local_nlargefree uintptr                  // number of frees for large objects (>maxsmallsize)
 	local_nsmallfree [_NumSizeClasses]uintptr // number of frees for small objects (<=maxsmallsize)
 
-	// flushGen indicates the sweepgen during which this mcache
-	// was last flushed. If flushGen != mheap_.sweepgen, the spans
-	// in this mcache are stale and need to the flushed so they
-	// can be swept. This is done in acquirep.
+	// flushGen indicates the sweepgen during which this mcache was last flushed.  flushGen表示上一次刷新此 mcache 的 sweepgen
+	// If flushGen != mheap_.sweepgen,
+	// the spans in this mcache are stale and need to the flushed so they can be swept.  此 mcache 中的 spans 已过时，需要进行刷新，以便可以对其进行扫描
+	// This is done in acquirep. 这是在 acquirep 中完成的
 	flushGen uint32
 }
 
@@ -63,8 +64,8 @@ type gclink struct {
 	next gclinkptr
 }
 
-// A gclinkptr is a pointer to a gclink, but it is opaque
-// to the garbage collector.
+// A gclinkptr is a pointer to a gclink,
+// but it is opaque to the garbage collector.
 type gclinkptr uintptr
 
 // ptr returns the *gclink form of p.
@@ -86,13 +87,17 @@ func allocmcache() *mcache {
 	var c *mcache
 	systemstack(func() {
 		lock(&mheap_.lock)
+		// 分配 mcache
 		c = (*mcache)(mheap_.cachealloc.alloc())
 		c.flushGen = mheap_.sweepgen
 		unlock(&mheap_.lock)
 	})
+
+	// 目前所有的 mspan  都是 emptymspan
 	for i := range c.alloc {
 		c.alloc[i] = &emptymspan
 	}
+
 	c.next_sample = nextSample()
 	return c
 }
@@ -135,6 +140,7 @@ func (c *mcache) refill(spc spanClass) {
 	}
 
 	// Get a new cached span from the central lists.
+	// 从堆中的 central 中找合适的 span
 	s = mheap_.central[spc].mcentral.cacheSpan()
 	if s == nil {
 		throw("out of memory")
@@ -148,6 +154,7 @@ func (c *mcache) refill(spc spanClass) {
 	// sweeping in the next sweep phase.
 	s.sweepgen = mheap_.sweepgen + 3
 
+	// 把 span 回填到 c.alloc 数组里取
 	c.alloc[spc] = s
 }
 

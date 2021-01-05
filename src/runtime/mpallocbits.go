@@ -351,9 +351,7 @@ func (b *pallocBits) pages64(i uint) uint64 {
 	return (*pageBits)(b).block64(i)
 }
 
-// findBitRange64 returns the bit index of the first set of
-// n consecutive 1 bits. If no consecutive set of 1 bits of
-// size n may be found in c, then it returns an integer >= 64.
+// findBitRange64 returns the bit index of the first set of n consecutive 1 bits. If no consecutive set of 1 bits of size n may be found in c, then it returns an integer >= 64.
 func findBitRange64(c uint64, n uint) uint {
 	i := uint(0)
 	cont := uint(sys.TrailingZeros64(^c))

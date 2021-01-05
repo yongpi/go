@@ -43,11 +43,11 @@ type Value struct {
 
 	// flag holds metadata about the value.
 	// The lowest bits are flag bits:
-	//	- flagStickyRO: obtained via unexported not embedded field, so read-only
-	//	- flagEmbedRO: obtained via unexported embedded field, so read-only
-	//	- flagIndir: val holds a pointer to the data
-	//	- flagAddr: v.CanAddr is true (implies flagIndir)
-	//	- flagMethod: v is a method value.
+	//	- flagStickyRO: obtained via unexported not embedded field, so read-only  通过未导出的未嵌入字段获取，只读
+	//	- flagEmbedRO: obtained via unexported embedded field, so read-only  通过未导出的嵌入字段获取，只读
+	//	- flagIndir: val holds a pointer to the data   val 持有一个指向数据的指针
+	//	- flagAddr: v.CanAddr is true (implies flagIndir) 可以获取地址
+	//	- flagMethod: v is a method value. v 是一个方法的 value
 	// The next five bits give the Kind of the value.
 	// This repeats typ.Kind() except for method values.
 	// The remaining 23+ bits give a method number for method values.
@@ -66,13 +66,13 @@ type flag uintptr
 
 const (
 	flagKindWidth        = 5 // there are 27 kinds
-	flagKindMask    flag = 1<<flagKindWidth - 1
-	flagStickyRO    flag = 1 << 5
-	flagEmbedRO     flag = 1 << 6
-	flagIndir       flag = 1 << 7
-	flagAddr        flag = 1 << 8
-	flagMethod      flag = 1 << 9
-	flagMethodShift      = 10
+	flagKindMask    flag = 1<<flagKindWidth - 1  // kind 补码
+	flagStickyRO    flag = 1 << 5  // 是否为只读(未导出)
+	flagEmbedRO     flag = 1 << 6  // 是否为嵌入
+	flagIndir       flag = 1 << 7  // 间接地址 (不是指针，或者是指针的指针)
+	flagAddr        flag = 1 << 8  // 可寻址
+	flagMethod      flag = 1 << 9  // 函数
+	flagMethodShift      = 10  // method index 位移数
 	flagRO          flag = flagStickyRO | flagEmbedRO
 )
 
@@ -106,26 +106,30 @@ func packEface(v Value) interface{} {
 	e := (*emptyInterface)(unsafe.Pointer(&i))
 	// First, fill in the data portion of the interface.
 	switch {
+	// 说明是个值类型
 	case ifaceIndir(t):
 		if v.flag&flagIndir == 0 {
 			panic("bad indir")
 		}
 		// Value is indirect, and so is the interface we're making.
 		ptr := v.ptr
+		// 说明可寻址，也就是说是个 Elem
 		if v.flag&flagAddr != 0 {
 			// TODO: pass safe boolean from valueInterface so
 			// we don't need to copy if safe==true?
 			c := unsafe_New(t)
 			typedmemmove(t, c, ptr)
+			// 搞一个新的地址赋值
 			ptr = c
 		}
+		// 不可寻址，说明就是个值的副本， 直接赋值就行
 		e.word = ptr
-	case v.flag&flagIndir != 0:
+	case v.flag&flagIndir != 0: // 又不是值类型，并且 flagIndir 说明是个值为指针的类型（指针的指针的 Elem）
 		// Value is indirect, but interface is direct. We need
 		// to load the data at v.ptr into the interface data word.
 		e.word = *(*unsafe.Pointer)(v.ptr)
 	default:
-		// Value is direct, and so is the interface.
+		// Value is direct, and so is the interface. 就是个指针
 		e.word = v.ptr
 	}
 	// Now, fill in the type portion. We're very careful here not
@@ -138,6 +142,7 @@ func packEface(v Value) interface{} {
 
 // unpackEface converts the empty interface i to a Value.
 func unpackEface(i interface{}) Value {
+	// 转成 eface
 	e := (*emptyInterface)(unsafe.Pointer(&i))
 	// NOTE: don't read e.word until we know whether it is really a pointer or not.
 	t := e.typ
@@ -178,12 +183,14 @@ func methodName() string {
 }
 
 // emptyInterface is the header for an interface{} value.
+// 空 interface 的头信息，也就是 eface
 type emptyInterface struct {
 	typ  *rtype
 	word unsafe.Pointer
 }
 
 // nonEmptyInterface is the header for an interface value with methods.
+// 带函数的 interface 的头信息， 也就是 iface
 type nonEmptyInterface struct {
 	// see ../runtime/iface.go:/Itab
 	itab *struct {
@@ -253,10 +260,13 @@ func (f flag) mustBeAssignableSlow() {
 // Addr is typically used to obtain a pointer to a struct field
 // or slice element in order to call a method that requires a
 // pointer receiver.
+// 返回一个指针的值。
+// 该方法通常用于获取指向 struct 字段或者 slice 元素的指针，以便于调用需要指针接收器的方法
 func (v Value) Addr() Value {
 	if v.flag&flagAddr == 0 {
 		panic("reflect.Value.Addr of unaddressable value")
 	}
+	// type 变成 typ.ptrTo, flag 也位或上了 Ptr
 	return Value{v.typ.ptrTo(), v.ptr, v.flag.ro() | flag(Ptr)}
 }
 
@@ -303,6 +313,7 @@ func (v Value) CanAddr() bool {
 // obtained by the use of unexported struct fields.
 // If CanSet returns false, calling Set or any type-specific
 // setter (e.g., SetBool, SetInt) will panic.
+// 可寻址并且可导出
 func (v Value) CanSet() bool {
 	return v.flag&(flagAddr|flagRO) == flagAddr
 }
@@ -386,10 +397,13 @@ func (v Value) call(op string, in []Value) []Value {
 		}
 	}
 	for i := 0; i < n; i++ {
+		// 判断参数类型是否一致
 		if xt, targ := in[i].Type(), t.In(i); !xt.AssignableTo(targ) {
 			panic("reflect: " + op + " using " + xt.String() + " as type " + targ.String())
 		}
 	}
+
+	// 折腾一下可变参数
 	if !isSlice && t.IsVariadic() {
 		// prepare slice for remaining values
 		m := len(in) - n
@@ -430,6 +444,7 @@ func (v Value) call(op string, in []Value) []Value {
 
 	// Copy inputs into args.
 	if rcvrtype != nil {
+		// args 现在变成 rcvr 对应的值了
 		storeRcvr(rcvr, args)
 		off = ptrSize
 	}
@@ -437,6 +452,7 @@ func (v Value) call(op string, in []Value) []Value {
 		v.mustBeExported()
 		targ := t.In(i).(*rtype)
 		a := uintptr(targ.align)
+		// 计算内存位移
 		off = (off + a - 1) &^ (a - 1)
 		n := targ.size
 		if n == 0 {
@@ -446,8 +462,11 @@ func (v Value) call(op string, in []Value) []Value {
 			v.assignTo("reflect.Value.Call", targ, nil)
 			continue
 		}
+		// 计算地址，算成参数地址
 		addr := add(args, off, "n > 0")
+		// 检验类型，话说上面不是检验过了吗，咋又来一遍
 		v = v.assignTo("reflect.Value.Call", targ, addr)
+		// 把 v.ptr 赋值给 addr
 		if v.flag&flagIndir != 0 {
 			typedmemmove(targ, addr, v.ptr)
 		} else {
@@ -472,6 +491,7 @@ func (v Value) call(op string, in []Value) []Value {
 		// Zero the now unused input area of args,
 		// because the Values returned by this function contain pointers to the args object,
 		// and will thus keep the args object alive indefinitely.
+		// 清掉 args ,防止又复活了
 		typedmemclrpartial(frametype, args, 0, retOffset)
 
 		// Wrap Values around return values in args.
@@ -612,23 +632,31 @@ func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool) {
 func methodReceiver(op string, v Value, methodIndex int) (rcvrtype *rtype, t *funcType, fn unsafe.Pointer) {
 	i := methodIndex
 	if v.typ.Kind() == Interface {
+		// 先转成 接口类型
 		tt := (*interfaceType)(unsafe.Pointer(v.typ))
 		if uint(i) >= uint(len(tt.methods)) {
 			panic("reflect: internal error: invalid method index")
 		}
+		// 取接口里的 method
 		m := &tt.methods[i]
 		if !tt.nameOff(m.name).isExported() {
 			panic("reflect: " + op + " of unexported method")
 		}
+		// 转成 iface
 		iface := (*nonEmptyInterface)(v.ptr)
 		if iface.itab == nil {
 			panic("reflect: " + op + " of method on nil interface value")
 		}
+		// 动态类型的 type
 		rcvrtype = iface.itab.typ
+		// 动态类型指向的 fn 指针
 		fn = unsafe.Pointer(&iface.itab.fun[i])
+		// 静态类型的 funcType， 因为和动态类型的一样
 		t = (*funcType)(unsafe.Pointer(tt.typeOff(m.typ)))
 	} else {
+		// 结构体的话, 当前 type 就是 Type
 		rcvrtype = v.typ
+		// 可导出的方法集合
 		ms := v.typ.exportedMethods()
 		if uint(i) >= uint(len(ms)) {
 			panic("reflect: internal error: invalid method index")
@@ -653,6 +681,7 @@ func storeRcvr(v Value, p unsafe.Pointer) {
 	if t.Kind() == Interface {
 		// the interface data word becomes the receiver word
 		iface := (*nonEmptyInterface)(v.ptr)
+		// 指向真正的数据
 		*(*unsafe.Pointer)(p) = iface.word
 	} else if v.flag&flagIndir != 0 && !ifaceIndir(t) {
 		*(*unsafe.Pointer)(p) = *(*unsafe.Pointer)(v.ptr)
@@ -785,6 +814,7 @@ func (v Value) Complex() complex128 {
 // or that the pointer v points to.
 // It panics if v's Kind is not Interface or Ptr.
 // It returns the zero Value if v is nil.
+// 获取指针指向的变量或者 interface 包含的变量
 func (v Value) Elem() Value {
 	k := v.kind()
 	switch k {
@@ -794,7 +824,7 @@ func (v Value) Elem() Value {
 			eface = *(*interface{})(v.ptr)
 		} else {
 			eface = (interface{})(*(*interface {
-				M()
+				M() // 一个带有 M 方法的 interface 不知道为啥
 			})(v.ptr))
 		}
 		x := unpackEface(eface)
@@ -813,6 +843,7 @@ func (v Value) Elem() Value {
 		}
 		tt := (*ptrType)(unsafe.Pointer(v.typ))
 		typ := tt.elem
+		// 更改 flag
 		fl := v.flag&flagRO | flagIndir | flagAddr
 		fl |= flag(typ.Kind())
 		return Value{typ, ptr, fl}
@@ -989,6 +1020,7 @@ func (v Value) CanInterface() bool {
 //	var i interface{} = (v's underlying value)
 // It panics if the Value was obtained by accessing
 // unexported struct fields.
+// 如果 value 是通过访问未导出字段获得的，则会 panic
 func (v Value) Interface() (i interface{}) {
 	return valueInterface(v, true)
 }
@@ -1043,14 +1075,18 @@ func (v Value) InterfaceData() [2]uintptr {
 // by calling ValueOf with an uninitialized interface variable i,
 // i==nil will be true but v.IsNil will panic as v will be the zero
 // Value.
+// kind 必须是以下的类型
 func (v Value) IsNil() bool {
 	k := v.kind()
 	switch k {
 	case Chan, Func, Map, Ptr, UnsafePointer:
+		// 这块有点不大明白啊
 		if v.flag&flagMethod != 0 {
 			return false
 		}
 		ptr := v.ptr
+
+
 		if v.flag&flagIndir != 0 {
 			ptr = *(*unsafe.Pointer)(ptr)
 		}
@@ -1298,15 +1334,18 @@ func (v Value) Method(i int) Value {
 	if v.typ == nil {
 		panic(&ValueError{"reflect.Value.Method", Invalid})
 	}
+	// 本身就是个 method 还来凑啥热闹
 	if v.flag&flagMethod != 0 || uint(i) >= uint(v.typ.NumMethod()) {
 		panic("reflect: Method index out of range")
 	}
 	if v.typ.Kind() == Interface && v.IsNil() {
 		panic("reflect: Method on nil interface value")
 	}
+	// 加上函数相关的 flag 补码
 	fl := v.flag & (flagStickyRO | flagIndir) // Clear flagEmbedRO
 	fl |= flag(Func)
 	fl |= flag(i)<<flagMethodShift | flagMethod
+	// 这里的 type 并不是 Method 的 type, 而是方法接收者的 type， 通过 v.Type() 可以获取到 method 的准确 type
 	return Value{v.typ, v.ptr, fl}
 }
 
@@ -1866,6 +1905,7 @@ func (v Value) TrySend(x Value) bool {
 }
 
 // Type returns v's type.
+// 获取正在的 type, 当然针对的是 method value
 func (v Value) Type() Type {
 	f := v.flag
 	if f == 0 {
@@ -2322,6 +2362,7 @@ func ValueOf(i interface{}) Value {
 	// For now we make the contents always escape to the heap. It
 	// makes life easier in a few places (see chanrecv/mapassign
 	// comment below).
+	// 让 i 逃逸到堆上
 	escapes(i)
 
 	return unpackEface(i)
@@ -2369,6 +2410,7 @@ func NewAt(typ Type, p unsafe.Pointer) Value {
 // For a conversion to an interface type, target is a suggested scratch space to use.
 func (v Value) assignTo(context string, dst *rtype, target unsafe.Pointer) Value {
 	if v.flag&flagMethod != 0 {
+		// 假如是 method 的话，需要转换成真正的 method 的 reflect.Value
 		v = makeMethodValue(context, v)
 	}
 

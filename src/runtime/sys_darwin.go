@@ -361,6 +361,7 @@ func pthread_mutex_init_trampoline()
 
 //go:nosplit
 //go:cgo_unsafe_args
+// 这是一个可重入锁
 func pthread_mutex_lock(m *pthreadmutex) int32 {
 	return libcCall(unsafe.Pointer(funcPC(pthread_mutex_lock_trampoline)), unsafe.Pointer(&m))
 }

@@ -109,7 +109,7 @@ func (rw *RWMutex) Lock() {
 	// Announce to readers there is a pending writer.
 	r := atomic.AddInt32(&rw.readerCount, -rwmutexMaxReaders) + rwmutexMaxReaders
 	// Wait for active readers.
-	// 有读操作，等待多个多操作完成
+	// 有读操作，等待多个读操作完成
 	if r != 0 && atomic.AddInt32(&rw.readerWait, r) != 0 {
 		runtime_SemacquireMutex(&rw.writerSem, false, 0)
 	}

@@ -98,6 +98,7 @@ func (wg *WaitGroup) Add(delta int) {
 	if *statep != state {
 		panic("sync: WaitGroup misuse: Add called concurrently with Wait")
 	}
+	// 到这里， v 一定是 0
 	// Reset waiters count to 0.
 	*statep = 0
 	for ; w != 0; w-- {

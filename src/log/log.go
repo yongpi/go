@@ -155,12 +155,14 @@ func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
 // already a newline. Calldepth is used to recover the PC and is
 // provided for generality, although at the moment on all pre-defined
 // paths it will be 2.
+// calldepth 为 2 意味着往前面跳两个栈，也就是跳到上上层调用函数的栈中
 func (l *Logger) Output(calldepth int, s string) error {
 	now := time.Now() // get this early.
 	var file string
 	var line int
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// 打印出文件
 	if l.flag&(Lshortfile|Llongfile) != 0 {
 		// Release lock while getting caller info - it's expensive.
 		l.mu.Unlock()

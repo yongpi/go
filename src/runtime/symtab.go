@@ -80,6 +80,7 @@ func (ci *Frames) Next() (frame Frame, more bool) {
 		}
 		pc := ci.callers[0]
 		ci.callers = ci.callers[1:]
+		// 通过程序计数器获取到方法信息
 		funcInfo := findfunc(pc)
 		if !funcInfo.valid() {
 			if cgoSymbolizer != nil {

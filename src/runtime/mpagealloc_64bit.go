@@ -31,22 +31,19 @@ var levelBits = [summaryLevels]uint{
 	summaryLevelBits,
 }
 
-// levelShift is the number of bits to shift to acquire the radix for a given level
-// in the super summary structure.
+// levelShift is the number of bits to shift to acquire the radix for a given level in the super summary structure.
 //
-// With levelShift, one can compute the index of the summary at level l related to a
-// pointer p by doing:
+// With levelShift, one can compute the index of the summary at level l related to a pointer p by doing:
 //   p >> levelShift[l]
 var levelShift = [summaryLevels]uint{
-	heapAddrBits - summaryL0Bits,
-	heapAddrBits - summaryL0Bits - 1*summaryLevelBits,
-	heapAddrBits - summaryL0Bits - 2*summaryLevelBits,
-	heapAddrBits - summaryL0Bits - 3*summaryLevelBits,
-	heapAddrBits - summaryL0Bits - 4*summaryLevelBits,
+	heapAddrBits - summaryL0Bits, // 34
+	heapAddrBits - summaryL0Bits - 1*summaryLevelBits, // 31
+	heapAddrBits - summaryL0Bits - 2*summaryLevelBits, // 28
+	heapAddrBits - summaryL0Bits - 3*summaryLevelBits, // 25
+	heapAddrBits - summaryL0Bits - 4*summaryLevelBits, // 22
 }
 
-// levelLogPages is log2 the maximum number of runtime pages in the address space
-// a summary in the given level represents.
+// levelLogPages is log2 the maximum number of runtime pages in the address space a summary in the given level represents.
 //
 // The leaf level always represents exactly log2 of 1 chunk's worth of pages.
 var levelLogPages = [summaryLevels]uint{
@@ -57,12 +54,10 @@ var levelLogPages = [summaryLevels]uint{
 	logPallocChunkPages,
 }
 
-// sysInit performs architecture-dependent initialization of fields
-// in pageAlloc. pageAlloc should be uninitialized except for sysStat
-// if any runtime statistic should be updated.
+// sysInit performs architecture-dependent initialization of fields in pageAlloc.
+// pageAlloc should be uninitialized except for sysStat if any runtime statistic should be updated.
 func (s *pageAlloc) sysInit() {
-	// Reserve memory for each level. This will get mapped in
-	// as R/W by setArenas.
+	// Reserve memory for each level. This will get mapped in as R/W by setArenas.
 	for l, shift := range levelShift {
 		entries := 1 << (heapAddrBits - shift)
 
@@ -99,9 +94,7 @@ func (s *pageAlloc) sysGrow(base, limit uintptr) {
 	cbase, climit := chunkBase(s.start), chunkBase(s.end)
 	for l := len(s.summary) - 1; l >= 0; l-- {
 		// Figure out what part of the summary array this new address space needs.
-		// Note that we need to align the ranges to the block width (1<<levelBits[l])
-		// at this level because the full block is needed to compute the summary for
-		// the next level.
+		// Note that we need to align the ranges to the block width (1<<levelBits[l]) at this level because the full block is needed to compute the summary for the next level.
 		lo, hi := addrsToSummaryRange(l, base, limit)
 		lo, hi = blockAlignSummaryRange(l, lo, hi)
 

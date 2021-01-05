@@ -20,8 +20,8 @@ import "runtime/internal/atomic"
 type mcentral struct {
 	lock      mutex
 	spanclass spanClass
-	nonempty  mSpanList // list of spans with a free object, ie a nonempty free list
-	empty     mSpanList // list of spans with no free objects (or cached in an mcache)
+	nonempty  mSpanList // list of spans with a free object, ie a nonempty free list  具有空闲对象的 span list, 也就是非空的空闲列表
+	empty     mSpanList // list of spans with no free objects (or cached in an mcache) 没有空闲对象的 span list
 
 	// nmalloc is the cumulative count of objects allocated from
 	// this mcentral, assuming all spans in mcaches are
@@ -39,7 +39,9 @@ func (c *mcentral) init(spc spanClass) {
 // Allocate a span to use in an mcache.
 func (c *mcentral) cacheSpan() *mspan {
 	// Deduct credit for this span allocation and sweep if necessary.
+	// 需要的字节大小
 	spanBytes := uintptr(class_to_allocnpages[c.spanclass.sizeclass()]) * _PageSize
+	// gc 扫描，先不管
 	deductSweepCredit(spanBytes, 0)
 
 	lock(&c.lock)
@@ -103,11 +105,13 @@ retry:
 	unlock(&c.lock)
 
 	// Replenish central list if empty.
+	// 如果 central list 是空，则补充 span
 	s = c.grow()
 	if s == nil {
 		return nil
 	}
 	lock(&c.lock)
+	// 插入到 empty 里
 	c.empty.insertBack(s)
 	unlock(&c.lock)
 
@@ -249,9 +253,12 @@ func (c *mcentral) freeSpan(s *mspan, preserve bool, wasempty bool) bool {
 
 // grow allocates a new empty span from the heap and initializes it for c's size class.
 func (c *mcentral) grow() *mspan {
+	// 多少 page
 	npages := uintptr(class_to_allocnpages[c.spanclass.sizeclass()])
+	// 对象大小
 	size := uintptr(class_to_size[c.spanclass.sizeclass()])
 
+	// 去堆中申请 mspan
 	s := mheap_.alloc(npages, c.spanclass, true)
 	if s == nil {
 		return nil
@@ -261,6 +268,7 @@ func (c *mcentral) grow() *mspan {
 	// n := (npages << _PageShift) / size
 	n := (npages << _PageShift) >> s.divShift * uintptr(s.divMul) >> s.divShift2
 	s.limit = s.base() + size*n
+	// 更新 heapArena 的 bitmap
 	heapBitsForAddr(s.base()).initSpan(s)
 	return s
 }

@@ -30,8 +30,8 @@ import (
 // 说回来，read 是干啥使的， read 只用来读取和删除，读取的时候不加锁，删除的时候使用自旋加上 CAS ，不加锁并且保证成功
 // dirty 是用来读和写的，刚开始的元素都会放到 dirty 里，假如获取 key 的时候，read 一直没命中，当 misses == len(dirty) 时，会把 dirty 里的值转移到 read 里，
 // 并且把 dirty 置为 nil， 这个时候假如写进来一个新的 key 和 value，这个时候会把 read 里的没删除的值复制一份到 dirty 里， 并且把新的值放到 dirty里
-// 也就是说，重中之重来了，然我来新起一行
-// read 用来读和删除的时候不会加锁，所以很快，删除也不是真删除。dirty 为 nil 或者 read 的父集合，read 中包含 read 中有的和没有的值，包括新插入的元素
+// 也就是说，重中之重来了，我来新起一行
+// read 用来读和删除的时候不会加锁，所以很快，删除也不是真删除。dirty 为 nil 或者 read 的父集合，dirty 中包含 read 中有的和没有的值，包括新插入的元素
 // 每当 read 错过命中的个数超过 dirty 的 len 时，就会把 dirty 转移到 read 中， 读写分离了
 type Map struct {
 	mu Mutex
@@ -149,13 +149,17 @@ func (m *Map) Store(key, value interface{}) {
 	}
 
 	m.mu.Lock()
+	// 加锁之后再查一遍
 	read, _ = m.read.Load().(readOnly)
 	if e, ok := read.m[key]; ok {
+		// e 已经被软删除了，真删除它
 		if e.unexpungeLocked() {
 			// The entry was previously expunged, which implies that there is a
 			// non-nil dirty map and this entry is not in it.
+			// 放在 dirty 里一份
 			m.dirty[key] = e
 		}
+		// 更新 e
 		e.storeLocked(&value)
 	} else if e, ok := m.dirty[key]; ok {
 		e.storeLocked(&value)
@@ -350,6 +354,7 @@ func (m *Map) missLocked() {
 	if m.misses < len(m.dirty) {
 		return
 	}
+	// 此时 readOnly amended 为 false
 	m.read.Store(readOnly{m: m.dirty})
 	m.dirty = nil
 	m.misses = 0

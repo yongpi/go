@@ -53,32 +53,34 @@ import (
 )
 
 const (
-	// The size of a bitmap chunk, i.e. the amount of bits (that is, pages) to consider
-	// in the bitmap at once.
+	// The size of a bitmap chunk,
+	// i.e. the amount of bits (that is, pages) to consider in the bitmap at once.
+	// 每个 chunk 是 64 位， 可以代表 64 个指针， 一个 pallocData 有 8 个 chunk, 也就是 64*8 KB
 	pallocChunkPages    = 1 << logPallocChunkPages
+	// 8 个 chunk，一个 chunk 表示 64 * 8 KB， 8 个 chunk 就是 512 * 8 KB = 4 M
 	pallocChunkBytes    = pallocChunkPages * pageSize
 	logPallocChunkPages = 9
+	// 一个 pallocData (pallocBits) 对应的位移量  22
 	logPallocChunkBytes = logPallocChunkPages + pageShift
 
 	// The number of radix bits for each level.
 	//
-	// The value of 3 is chosen such that the block of summaries we need to scan at
-	// each level fits in 64 bytes (2^3 summaries * 8 bytes per summary), which is
-	// close to the L1 cache line width on many systems. Also, a value of 3 fits 4 tree
-	// levels perfectly into the 21-bit pallocBits summary field at the root level.
+	// The value of 3 is chosen such that the block of summaries we need to scan at each level fits in 64 bytes (2^3 summaries * 8 bytes per summary),
+	// which is close to the L1 cache line width on many systems.
+	// Also, a value of 3 fits 4 tree levels perfectly into the 21-bit pallocBits summary field at the root level.
 	//
 	// The following equation explains how each of the constants relate:
 	// summaryL0Bits + (summaryLevels-1)*summaryLevelBits + logPallocChunkBytes = heapAddrBits
 	//
 	// summaryLevels is an architecture-dependent value defined in mpagealloc_*.go.
 	summaryLevelBits = 3
+	// 64 位系统， 14
 	summaryL0Bits    = heapAddrBits - logPallocChunkBytes - (summaryLevels-1)*summaryLevelBits
 
 	// Maximum searchAddr value, which indicates that the heap has no free space.
 	//
-	// We subtract arenaBaseOffset because we want this to represent the maximum
-	// value in the shifted address space, but searchAddr is stored as a regular
-	// memory address. See arenaBaseOffset for details.
+	// We subtract arenaBaseOffset because we want this to represent the maximum value in the shifted address space, but searchAddr is stored as a regular memory address.
+	// See arenaBaseOffset for details.
 	maxSearchAddr = ^uintptr(0) - arenaBaseOffset
 
 	// Minimum scavAddr value, which indicates that the scavenger is done.
@@ -111,11 +113,9 @@ func chunkPageIndex(p uintptr) uint {
 	return uint(p % pallocChunkBytes / pageSize)
 }
 
-// addrsToSummaryRange converts base and limit pointers into a range
-// of entries for the given summary level.
+// addrsToSummaryRange converts base and limit pointers into a range of entries for the given summary level.
 //
-// The returned range is inclusive on the lower bound and exclusive on
-// the upper bound.
+// The returned range is inclusive on the lower bound and exclusive on the upper bound.
 func addrsToSummaryRange(level int, base, limit uintptr) (lo int, hi int) {
 	// This is slightly more nuanced than just a shift for the exclusive
 	// upper-bound. Note that the exclusive upper bound may be within a
@@ -139,20 +139,22 @@ func blockAlignSummaryRange(level int, lo, hi int) (int, int) {
 }
 
 type pageAlloc struct {
+	// 基数摘要树
 	// Radix tree of summaries.
 	//
+	// 每一个 slice 的 cap 代表整个内存预留
+	// 每个 slice 的 len 反应分配器所在 level 的最大已知映射堆地址
 	// Each slice's cap represents the whole memory reservation.
 	// Each slice's len reflects the allocator's maximum known
 	// mapped heap address for that level.
 	//
-	// The backing store of each summary level is reserved in init
-	// and may or may not be committed in grow (small address spaces
-	// may commit all the memory in init).
+	// 每个摘要级别的后备存储都是在 init 中保留的，并且可能会或可能不会在增长中提交
+	// 小地址空间很可能在 init 时提交所有的内存
+	// The backing store of each summary level is reserved in init and may or may not be committed in grow (small address spaces may commit all the memory in init).
 	//
-	// The purpose of keeping len <= cap is to enforce bounds checks
-	// on the top end of the slice so that instead of an unknown
-	// runtime segmentation fault, we get a much friendlier out-of-bounds
-	// error.
+	//
+	// The purpose of keeping len <= cap is to enforce bounds checks on the top end of the slice so that instead of an unknown runtime segmentation fault,
+	// we get a much friendlier out-of-bounds error.
 	//
 	// We may still get segmentation faults < len since some of that
 	// memory may not be committed yet.
@@ -223,6 +225,7 @@ func (s *pageAlloc) init(mheapLock *mutex, sysStat *uint64) {
 	s.sysStat = sysStat
 
 	// System-dependent initialization.
+	// 初始化基数树
 	s.sysInit()
 
 	// Start with the searchAddr in a state indicating there's no free memory.
@@ -233,11 +236,14 @@ func (s *pageAlloc) init(mheapLock *mutex, sysStat *uint64) {
 
 	// Reserve space for the bitmap and put this reservation
 	// into the chunks slice.
+	// 最多多少 chunk
 	const maxChunks = (1 << heapAddrBits) / pallocChunkBytes
+	// 预留这么多内存，用来分配指针的 bitmap
 	r := sysReserve(nil, maxChunks*unsafe.Sizeof(s.chunks[0]))
 	if r == nil {
 		throw("failed to reserve page bitmap memory")
 	}
+	// 转换成非堆的 slice
 	sl := notInHeapSlice{(*notInHeap)(r), 0, maxChunks}
 	s.chunks = *(*[]pallocData)(unsafe.Pointer(&sl))
 
@@ -374,6 +380,7 @@ func (s *pageAlloc) grow(base, size uintptr) {
 	// Update summaries accordingly. The grow acts like a free, so
 	// we need to ensure this newly-free memory is visible in the
 	// summaries.
+	// 更新基数摘要树
 	s.update(base, size/pageSize, true, false)
 }
 
@@ -392,8 +399,8 @@ func (s *pageAlloc) update(base, npages uintptr, contig, alloc bool) {
 
 	// Handle updating the lowest level first.
 	if sc == ec {
-		// Fast path: the allocation doesn't span more than one chunk,
-		// so update this one and if the summary didn't change, return.
+		// Fast path: the allocation doesn't span more than one chunk, so update this one and if the summary didn't change, return.
+		// 分配不会跨 chunk
 		x := s.summary[len(s.summary)-1][sc]
 		y := s.chunks[sc].summarize()
 		if x == y {
@@ -418,6 +425,7 @@ func (s *pageAlloc) update(base, npages uintptr, contig, alloc bool) {
 			}
 		} else {
 			for i := range whole {
+				// 全都变成可用内存为一个 chunk
 				whole[i] = freeChunkSum
 			}
 		}
@@ -438,6 +446,7 @@ func (s *pageAlloc) update(base, npages uintptr, contig, alloc bool) {
 
 	// Walk up the radix tree and update the summaries appropriately.
 	changed := true
+	// 因为最底层的摘要已经更新了， 更新上面四层
 	for l := len(s.summary) - 2; l >= 0 && changed; l-- {
 		// Update summaries at level l from summaries at level l+1.
 		changed = false
@@ -740,6 +749,7 @@ func (s *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 	// If npages has a chance of fitting in the chunk where the searchAddr is,
 	// search it directly.
 	searchAddr := uintptr(0)
+	// 在一个 pallocData 里能搞定
 	if pallocChunkPages-chunkPageIndex(s.searchAddr) >= uint(npages) {
 		// npages is guaranteed to be no greater than pallocChunkPages here.
 		i := chunkIndex(s.searchAddr)
@@ -757,6 +767,7 @@ func (s *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 	}
 	// We failed to use a searchAddr for one reason or another, so try
 	// the slow path.
+	// 在一个 pallocData 里搞不定的
 	addr, searchAddr = s.find(npages)
 	if addr == 0 {
 		if npages == 1 {
@@ -823,6 +834,7 @@ const (
 	maxPackedValue    = 1 << logMaxPackedValue
 	logMaxPackedValue = logPallocChunkPages + (summaryLevels-1)*summaryLevelBits
 
+	// start max end 都是 512, 也就是说可用内存为一个 chunk
 	freeChunkSum = pallocSum(uint64(pallocChunkPages) |
 		uint64(pallocChunkPages<<logMaxPackedValue) |
 		uint64(pallocChunkPages<<(2*logMaxPackedValue)))
@@ -884,16 +896,13 @@ func (p pallocSum) unpack() (uint, uint, uint) {
 func mergeSummaries(sums []pallocSum, logMaxPagesPerSum uint) pallocSum {
 	// Merge the summaries in sums into one.
 	//
-	// We do this by keeping a running summary representing the merged
-	// summaries of sums[:i] in start, max, and end.
+	// We do this by keeping a running summary representing the merged summaries of sums[:i] in start, max, and end.
 	start, max, end := sums[0].unpack()
 	for i := 1; i < len(sums); i++ {
 		// Merge in sums[i].
 		si, mi, ei := sums[i].unpack()
 
-		// Merge in sums[i].start only if the running summary is
-		// completely free, otherwise this summary's start
-		// plays no role in the combined sum.
+		// Merge in sums[i].start only if the running summary is completely free, otherwise this summary's start plays no role in the combined sum.
 		if start == uint(i)<<logMaxPagesPerSum {
 			start += si
 		}

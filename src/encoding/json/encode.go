@@ -377,6 +377,7 @@ func valueEncoder(v reflect.Value) encoderFunc {
 }
 
 func typeEncoder(t reflect.Type) encoderFunc {
+	// 先找一下对应的缓存
 	if fi, ok := encoderCache.Load(t); ok {
 		return fi.(encoderFunc)
 	}
@@ -1210,25 +1211,31 @@ func typeFields(t reflect.Type) structFields {
 			for i := 0; i < f.typ.NumField(); i++ {
 				sf := f.typ.Field(i)
 				isUnexported := sf.PkgPath != ""
+				// 假如是一个嵌入字段
 				if sf.Anonymous {
 					t := sf.Type
 					if t.Kind() == reflect.Ptr {
 						t = t.Elem()
 					}
+					// 假如内嵌字段非导出，并且不是结构体就忽略
 					if isUnexported && t.Kind() != reflect.Struct {
 						// Ignore embedded fields of unexported non-struct types.
 						continue
 					}
 					// Do not ignore embedded fields of unexported struct types
 					// since they may have exported fields.
+					// 非导出字段忽略
 				} else if isUnexported {
 					// Ignore unexported non-embedded fields.
 					continue
 				}
+				// 获取 json tag
 				tag := sf.Tag.Get("json")
+				// tag 为 - 表示忽略
 				if tag == "-" {
 					continue
 				}
+				// 把标签名称和限定条件解析出来
 				name, opts := parseTag(tag)
 				if !isValidTag(name) {
 					name = ""

@@ -9,12 +9,12 @@ import (
 	"unsafe"
 )
 
+// 512
 const pageCachePages = 8 * unsafe.Sizeof(pageCache{}.cache)
 
-// pageCache represents a per-p cache of pages the allocator can
-// allocate from without a lock. More specifically, it represents
-// a pageCachePages*pageSize chunk of memory with 0 or more free
-// pages in it.
+// pageCache 表示分配器可以在没有锁定的情况下分配的每个 p 的页缓存
+// pageCache represents a per-p cache of pages the allocator can allocate from without a lock.
+// More specifically, it represents a pageCachePages*pageSize chunk of memory with 0 or more free pages in it.
 type pageCache struct {
 	base  uintptr // base address of the chunk
 	cache uint64  // 64-bit bitmap representing free pages (1 means free)
@@ -104,8 +104,8 @@ func (c *pageCache) flush(s *pageAlloc) {
 //
 // s.mheapLock must be held.
 func (s *pageAlloc) allocToCache() pageCache {
-	// If the searchAddr refers to a region which has a higher address than
-	// any known chunk, then we know we're out of memory.
+	// If the searchAddr refers to a region which has a higher address than any known chunk,
+	// then we know we're out of memory.
 	if chunkIndex(s.searchAddr) >= s.end {
 		return pageCache{}
 	}

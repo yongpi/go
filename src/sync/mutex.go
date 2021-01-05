@@ -92,6 +92,7 @@ func (m *Mutex) lockSlow() {
 	for {
 		// Don't spin in starvation mode, ownership is handed off to waiters
 		// so we won't be able to acquire the mutex anyway.
+		// 能否自旋有限制，并且只自旋三次
 		// 饥饿模式不能自旋，所有权转交给等待的 goroutine, 所以不能获取到锁
 		// 处在锁定状态，但不是饥饿状态，并且可以自旋
 		// 此处为啥要自旋呢，当然是为了减少park和unpark的切换的开销，假如自旋等一会就能获取到锁，那就没必要阻塞了
@@ -100,11 +101,12 @@ func (m *Mutex) lockSlow() {
 			// Try to set mutexWoken flag to inform Unlock
 			// to not wake other blocked goroutines.
 			// 不是唤醒状态，并且队列不为0，设置为唤醒状态
+			// 避免自旋的时候，其他 g 过来立马就把锁抢走。起码到 lockSlow 里走一走
 			if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
 				atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
 				awoke = true
 			}
-			// 自旋
+			// 自旋，应该是让出 cpu 执行时间
 			runtime_doSpin()
 			iter++
 			old = m.state
@@ -118,6 +120,7 @@ func (m *Mutex) lockSlow() {
 		}
 		// 饥饿或者被锁定
 		if old&(mutexLocked|mutexStarving) != 0 {
+			// 等待数 + 1
 			new += 1 << mutexWaiterShift
 		}
 		// The current goroutine switches mutex to starvation mode.
@@ -151,7 +154,7 @@ func (m *Mutex) lockSlow() {
 			if waitStartTime == 0 {
 				waitStartTime = runtime_nanotime()
 			}
-			// 之前没等过，插到尾部，并且park
+			// 之前没等过，后进后出，之前等过，后进先出，并且park
 			runtime_SemacquireMutex(&m.sema, queueLifo, 1)
 			// 超过一毫秒没被唤醒
 			starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
@@ -165,7 +168,7 @@ func (m *Mutex) lockSlow() {
 				if old&(mutexLocked|mutexWoken) != 0 || old>>mutexWaiterShift == 0 {
 					throw("sync: inconsistent mutex state")
 				}
-				// 等待队列数减一， 不在唤醒操作里减，在这里减，为了不多耗时
+				// 等待队列数减一，但是状态增加 mutexLocked，为了在 unlock 的时候减掉的是 mutexLocked,而不是 mutexStarving
 				delta := int32(mutexLocked - 1<<mutexWaiterShift)
 				// 如果等待时间小于一毫秒，或者是最后一个 goroutine ，解除饥饿状态
 				if !starving || old>>mutexWaiterShift == 1 {
@@ -174,7 +177,7 @@ func (m *Mutex) lockSlow() {
 					// Starvation mode is so inefficient, that two goroutines
 					// can go lock-step infinitely once they switch mutex
 					// to starvation mode.
-					// 饥饿模式非常低效，一旦两个 goroutine 都切换锁到饥饿状态， 可能会无限制的锁定
+					// 饥饿模式非常低效，一旦两个 goroutine 都把 mutex 切换锁到饥饿状态， 可能会无限制的锁定 ????
 					delta -= mutexStarving
 				}
 				atomic.AddInt32(&m.state, delta)
@@ -229,7 +232,7 @@ func (m *Mutex) unlockSlow(new int32) {
 			// since we did not observe mutexStarving when we unlocked the mutex above.
 			// So get off the way.
 			// 没有等待的队列或者又处在三个状态之一
-			// 处在这三个状态之一说明已经又在竞争锁了，而且没进入到队列中，这个时候就不需要唤醒队列里的 g了
+			// 处在这三个状态之一说明已经又在竞争锁了，这个时候就不需要唤醒队列里的 g了
 			if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
 				return
 			}
@@ -251,7 +254,7 @@ func (m *Mutex) unlockSlow(new int32) {
 		// But mutex is still considered locked if mutexStarving is set,
 		// so new coming goroutines won't acquire it.
 		// 把等待队列中的sudog 对应的 g 变成待执行状态，并且放到当前 m 关联的 p 的队列的下一个执行的位置
-		// 并且有可能会把当前 m 执行的 g 放到 p 本地队列的队尾，然后立刻执行上面的 g
+		// 让出 cpu 执行时间，然后立刻执行上面的 g
 		runtime_Semrelease(&m.sema, true, 1)
 	}
 }

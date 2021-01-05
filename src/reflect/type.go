@@ -75,6 +75,7 @@ type Type interface {
 
 	// Name returns the type's name within its package for a defined type.
 	// For other (non-defined) types it returns the empty string.
+	// 未定义返回空
 	Name() string
 
 	// PkgPath returns a defined type's package path, that is, the import path
@@ -100,6 +101,7 @@ type Type interface {
 	Kind() Kind
 
 	// Implements reports whether the type implements the interface type u.
+	// 此处注意 interface 是用法
 	Implements(u Type) bool
 
 	// AssignableTo reports whether a value of the type is assignable to type u.
@@ -273,7 +275,6 @@ type tflag uint8
 const (
 	// tflagUncommon means that there is a pointer, *uncommonType,
 	// just beyond the outer type structure.
-	// 在外部结构体之外还有指针的存在
 	// For example, if t.Kind() == Struct and t.tflag&tflagUncommon != 0,
 	// then t has uncommonType data and it can be accessed as:
 	//
@@ -282,6 +283,7 @@ const (
 	//		u uncommonType
 	//	}
 	//	u := &(*tUncommon)(unsafe.Pointer(t)).u
+	// 说明该类型有 uncommonType
 	tflagUncommon tflag = 1 << 0
 
 	// tflagExtraStar means the name in the str field has an
@@ -306,38 +308,37 @@ const (
 type rtype struct {
 	size       uintptr
 	ptrdata    uintptr // number of bytes in the type that can contain pointers 包含指针的类型数
-	hash       uint32  // hash of type; avoids computation in hash tables
-	tflag      tflag   // extra type information flags
+	hash       uint32  // hash of type; avoids computation in hash tables       type 的 hash 值
+	tflag      tflag   // extra type information flags  关于 flag 的信息
 	align      uint8   // alignment of variable with this type
 	fieldAlign uint8   // alignment of struct field with this type
-	kind       uint8   // enumeration for C
+	kind       uint8   // enumeration for C // 类型
 	// function for comparing objects of this type
 	// (ptr to object A, ptr to object B) -> ==?
 	equal     func(unsafe.Pointer, unsafe.Pointer) bool
 	gcdata    *byte   // garbage collection data
 	str       nameOff // string form
-	ptrToThis typeOff // type for pointer to this type, may be zero
+	ptrToThis typeOff // type for pointer to this type, may be zero  指向该类型的指针类型
 }
 
 // Method on non-interface type
 type method struct {
 	name nameOff // name of method
-	mtyp typeOff // method type (without receiver)
-	ifn  textOff // fn used in interface call (one-word receiver)
-	tfn  textOff // fn used for normal method call
+	mtyp typeOff // method type (without receiver) 函数类型
+	ifn  textOff // fn used in interface call (one-word receiver) // 有 receiver 的方法
+	tfn  textOff // fn used for normal method call // 普通的方法
 }
 
 // uncommonType is present only for defined types or types with methods
 // (if T is a defined type, the uncommonTypes for T and *T have methods).
 // Using a pointer to this struct reduces the overall size required
 // to describe a non-defined type with no methods.
-// uncommonType 只对已经定义的类型和带有方法的类型存在，如果T是一个已定义的类型，T 和 *T 的 uncommonType 都有方法
-// 使用执行该结构的指针能够减少描述没有方法的未定义类型所需的总体大小  救救我，这是啥意思
+// 储存函数的类型
 type uncommonType struct {
 	pkgPath nameOff // import path; empty for built-in types like int, string
 	mcount  uint16  // number of methods
-	xcount  uint16  // number of exported methods
-	moff    uint32  // offset from this uncommontype to [mcount]method
+	xcount  uint16  // number of exported methods 导出的函数数量
+	moff    uint32  // offset from this uncommontype to [mcount]method 函数数组的偏移量
 	_       uint32  // unused
 }
 
@@ -370,7 +371,7 @@ type chanType struct {
 // A *rtype for each in and out parameter is stored in an array that
 // directly follows the funcType (and possibly its uncommonType). So
 // a function type with one method, one input, and one output is:
-//
+// 实际的函数应该是下面的类型， 输入输出参数的类型紧跟在 funcType 后面，（有可能是 funcType 是 uncommonType）, 说的就是 funcTypeFixed4 这种结构
 //	struct {
 //		funcType
 //		uncommonType
@@ -378,14 +379,14 @@ type chanType struct {
 //	}
 type funcType struct {
 	rtype
-	inCount  uint16
-	outCount uint16 // top bit is set if last input parameter is ...
+	inCount  uint16  // 输入参数
+	outCount uint16 // top bit is set if last input parameter is ... 输出参数
 }
 
 // imethod represents a method on an interface type
 type imethod struct {
 	name nameOff // name of method
-	typ  typeOff // .(*FuncType) underneath
+	typ  typeOff // .(*FuncType) underneath  指向 method 的 type 类型
 }
 
 // interfaceType represents an interface type.
@@ -411,8 +412,8 @@ type mapType struct {
 
 // ptrType represents a pointer type.
 type ptrType struct {
-	rtype
-	elem *rtype // pointer element (pointed at) type
+	rtype // 指针的类型
+	elem *rtype // pointer element (pointed at) type  指针指向的元素的类型
 }
 
 // sliceType represents a slice type.
@@ -432,6 +433,7 @@ func (f *structField) offset() uintptr {
 	return f.offsetEmbed >> 1
 }
 
+// 是否是嵌入的字段
 func (f *structField) embedded() bool {
 	return f.offsetEmbed&1 != 0
 }
@@ -497,6 +499,7 @@ func (n name) name() (s string) {
 	b := (*[4]byte)(unsafe.Pointer(n.bytes))
 
 	hdr := (*stringHeader)(unsafe.Pointer(&s))
+	// b[3] 有可能为字符串开头的地址
 	hdr.Data = unsafe.Pointer(&b[3])
 	hdr.Len = int(b[1])<<8 | int(b[2])
 	return s
@@ -587,7 +590,7 @@ type Method struct {
 }
 
 const (
-	kindDirectIface = 1 << 5
+	kindDirectIface = 1 << 5 // data 保存的是指针
 	kindGCProg      = 1 << 6 // Type.gc points to GC program
 	kindMask        = (1 << 5) - 1
 )
@@ -789,10 +792,12 @@ func (t *rtype) pointers() bool { return t.ptrdata != 0 }
 func (t *rtype) common() *rtype { return t }
 
 func (t *rtype) exportedMethods() []method {
+	// 获取存储函数列表的 uncommon
 	ut := t.uncommon()
 	if ut == nil {
 		return nil
 	}
+	// 获取导出的函数列表
 	return ut.exportedMethods()
 }
 
@@ -805,22 +810,27 @@ func (t *rtype) NumMethod() int {
 }
 
 func (t *rtype) Method(i int) (m Method) {
+	// 假如是 interface
 	if t.Kind() == Interface {
 		tt := (*interfaceType)(unsafe.Pointer(t))
 		return tt.Method(i)
 	}
+	// 获取导出的函数列表
 	methods := t.exportedMethods()
 	if i < 0 || i >= len(methods) {
 		panic("reflect: Method index out of range")
 	}
 	p := methods[i]
+	// 取函数的名字
 	pname := t.nameOff(p.name)
 	m.Name = pname.name()
 	fl := flag(Func)
 	mtyp := t.typeOff(p.mtyp)
 	ft := (*funcType)(unsafe.Pointer(mtyp))
 	in := make([]Type, 0, 1+len(ft.in()))
+	// 先把当前类型加到 in 里
 	in = append(in, t)
+	// 再把参数类型加到 in 里
 	for _, arg := range ft.in() {
 		in = append(in, arg)
 	}
@@ -829,6 +839,8 @@ func (t *rtype) Method(i int) (m Method) {
 	for _, ret := range ft.out() {
 		out = append(out, ret)
 	}
+
+	// 构建函数
 	mt := FuncOf(in, out, ft.IsVariadic())
 	m.Type = mt
 	tfn := t.textOff(p.tfn)
@@ -861,6 +873,7 @@ func (t *rtype) PkgPath() string {
 	if t.tflag&tflagNamed == 0 {
 		return ""
 	}
+	// 包路径在 uncommon 里
 	ut := t.uncommon()
 	if ut == nil {
 		return ""
@@ -868,6 +881,7 @@ func (t *rtype) PkgPath() string {
 	return t.nameOff(ut.pkgPath).name()
 }
 
+// 当 t 为 nil 时，自然 hasName 为 false
 func (t *rtype) hasName() bool {
 	return t.tflag&tflagNamed != 0
 }
@@ -892,6 +906,7 @@ func (t *rtype) ChanDir() ChanDir {
 	return ChanDir(tt.dir)
 }
 
+// 检查是否有可变参数
 func (t *rtype) IsVariadic() bool {
 	if t.Kind() != Func {
 		panic("reflect: IsVariadic of non-func type " + t.String())
@@ -925,6 +940,7 @@ func (t *rtype) Field(i int) StructField {
 	if t.Kind() != Struct {
 		panic("reflect: Field of non-struct type " + t.String())
 	}
+	// 转成 structType
 	tt := (*structType)(unsafe.Pointer(t))
 	return tt.Field(i)
 }
@@ -1017,6 +1033,7 @@ func (t *funcType) in() []*rtype {
 	if t.inCount == 0 {
 		return nil
 	}
+	// 这么看的话 funcType 的注释就能理解了
 	return (*[1 << 20]*rtype)(add(unsafe.Pointer(t), uadd, "t.inCount > 0"))[:t.inCount:t.inCount]
 }
 
@@ -1061,6 +1078,7 @@ func (t *interfaceType) Method(i int) (m Method) {
 		return
 	}
 	p := &t.methods[i]
+	// 构造 method
 	pname := t.nameOff(p.name)
 	m.Name = pname.name()
 	if !pname.isExported() {
@@ -1099,6 +1117,7 @@ type StructField struct {
 	// PkgPath is the package path that qualifies a lower case (unexported)
 	// field name. It is empty for upper case (exported) field names.
 	// See https://golang.org/ref/spec#Uniqueness_of_identifiers
+	// 假如字段为未导出的，PkgPath 为小写的路径名称，假如字段可以导出，则是空
 	PkgPath string
 
 	Type      Type      // field type
@@ -1198,7 +1217,7 @@ func (t *structType) Field(i int) (f StructField) {
 	f.Name = p.name.name()
 	f.Anonymous = p.embedded()
 	if !p.name.isExported() {
-		f.PkgPath = t.pkgPath.name()
+		f.PkgPath =  t.pkgPath.name()
 	}
 	if tag := p.name.tag(); tag != "" {
 		f.Tag = StructTag(tag)
@@ -1372,6 +1391,7 @@ func (t *structType) FieldByName(name string) (f StructField, present bool) {
 // TypeOf returns the reflection Type that represents the dynamic type of i.
 // If i is a nil interface value, TypeOf returns nil.
 func TypeOf(i interface{}) Type {
+	// 转成 eface
 	eface := *(*emptyInterface)(unsafe.Pointer(&i))
 	return toType(eface.typ)
 }
@@ -1408,6 +1428,7 @@ func (t *rtype) ptrTo() *rtype {
 
 	// Create a new ptrType starting with the description
 	// of an *unsafe.Pointer.
+	// 新建一个指针类型加入到 ptrMap
 	var iptr interface{} = (*unsafe.Pointer)(nil)
 	prototype := *(**ptrType)(unsafe.Pointer(&iptr))
 	pp := *prototype
@@ -1415,7 +1436,7 @@ func (t *rtype) ptrTo() *rtype {
 	pp.str = resolveReflectName(newName(s, "", false))
 	pp.ptrToThis = 0
 
-	// For the type structures linked into the binary, the
+	// For the type structures linked  into the binary, the
 	// compiler provides a good hash of the string.
 	// Create a good hash for the new string by using
 	// the FNV-1 hash's mixing function to combine the
@@ -1451,6 +1472,7 @@ func (t *rtype) AssignableTo(u Type) bool {
 		panic("reflect: nil type passed to Type.AssignableTo")
 	}
 	uu := u.(*rtype)
+	// 判断类型
 	return directlyAssignable(uu, t) || implements(uu, t)
 }
 
@@ -1488,6 +1510,7 @@ func implements(T, V *rtype) bool {
 	// This lets us run the scan in overall linear time instead of
 	// the quadratic time  a naive search would require.
 	// See also ../runtime/iface.go.
+	// 假如是 Interface 只判断静态类型
 	if V.Kind() == Interface {
 		v := (*interfaceType)(unsafe.Pointer(V))
 		i := 0
@@ -1518,6 +1541,7 @@ func implements(T, V *rtype) bool {
 		return false
 	}
 
+	// 不是 interface，判断实际的函数
 	v := V.uncommon()
 	if v == nil {
 		return false
@@ -1769,6 +1793,7 @@ type cacheKey struct {
 // The funcLookupCache caches FuncOf lookups.
 // FuncOf does not share the common lookupCache since cacheKey is not
 // sufficient to represent functions unambiguously.
+// 反射新建函数缓存
 var funcLookupCache struct {
 	sync.Mutex // Guards stores (but not loads) on m.
 
@@ -1906,6 +1931,7 @@ func MapOf(key, elem Type) Type {
 
 // TODO(crawshaw): as these funcTypeFixedN structs have no methods,
 // they could be defined at runtime using the StructOf function.
+// 这就是 funcType 注释里说的结构
 type funcTypeFixed4 struct {
 	funcType
 	args [4]*rtype
@@ -1940,12 +1966,14 @@ type funcTypeFixed128 struct {
 // true.
 // variadic 代表是否是可变参数，如果 variadic 为true， 而 in[len(in)-1] 不是 slice （最后一个参数是可变参数），则 panic
 func FuncOf(in, out []Type, variadic bool) Type {
+	// 检查是否为可变参数
 	if variadic && (len(in) == 0 || in[len(in)-1].Kind() != Slice) {
 		panic("reflect.FuncOf: last arg of variadic func must be slice")
 	}
 
 	// Make a func type.
 	var ifunc interface{} = (func())(nil)
+	// 从这里的表达式猜测一下, func() 关键字返回的是 funcType 的指针，所以 unsafe.Pointer(&ifunc) 才会强转成 **funcType
 	prototype := *(**funcType)(unsafe.Pointer(&ifunc))
 	n := len(in) + len(out)
 
@@ -2004,6 +2032,7 @@ func FuncOf(in, out []Type, variadic bool) Type {
 	ft.hash = hash
 	ft.inCount = uint16(len(in))
 	ft.outCount = uint16(len(out))
+	// 假如是可变参数
 	if variadic {
 		ft.outCount |= 1 << 15
 	}
@@ -2017,6 +2046,7 @@ func FuncOf(in, out []Type, variadic bool) Type {
 		}
 	}
 
+	// func 有全局缓存
 	// Not in cache, lock and retry.
 	funcLookupCache.Lock()
 	defer funcLookupCache.Unlock()
@@ -2037,6 +2067,7 @@ func FuncOf(in, out []Type, variadic bool) Type {
 		return tt
 	}
 
+	// 上面加缓存就为了下面不用遍历了吗？
 	// Look in known types for the same string representation.
 	str := funcStr(ft)
 	for _, tt := range typesByString(str) {
@@ -3058,6 +3089,7 @@ func funcLayout(t *funcType, rcvr *rtype) (frametype *rtype, argSize, retOffset 
 }
 
 // ifaceIndir reports whether t is stored indirectly in an interface value.
+// t 是否间接储存在一个接口值里 (不是指针或者是指针的指针之类的)
 func ifaceIndir(t *rtype) bool {
 	return t.kind&kindDirectIface == 0
 }

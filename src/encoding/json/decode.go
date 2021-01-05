@@ -596,6 +596,7 @@ func (d *decodeState) array(v reflect.Value) error {
 	}
 
 	if i < v.Len() {
+		// 设置零值
 		if v.Kind() == reflect.Array {
 			// Array. Zero the rest.
 			z := reflect.Zero(v.Type().Elem())

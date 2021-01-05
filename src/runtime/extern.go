@@ -207,6 +207,8 @@ func Caller(skip int) (pc uintptr, file string, line int, ok bool) {
 // directly is discouraged, as is using FuncForPC on any of the
 // returned PCs, since these cannot account for inlining or return
 // program counter adjustment.
+
+// skip 为 0 表示 Callers 栈本身， 为 1 表示调用 Callers 的函数栈
 func Callers(skip int, pc []uintptr) int {
 	// runtime.callers uses pc.array==nil as a signal
 	// to print a stack trace. Pick off 0-length pc here

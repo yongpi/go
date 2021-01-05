@@ -110,6 +110,7 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 	}
 
 	// Easy case.
+	// 说明有 g 正在被释放， 就不先不阻塞，返回再去抢一抢锁
 	if cansemacquire(addr) {
 		return
 	}
@@ -140,7 +141,7 @@ func semacquire1(addr *uint32, lifo bool, profile semaProfileFlags, skipframes i
 		s.acquiretime = t0
 	}
 	for {
-		// 锁定在 semaRoot 上
+		// 锁 m, 这里的锁定 m 用来保证串行的操作 root 属性
 		lock(&root.lock)
 		// Add ourselves to nwait to disable "easy case" in semrelease.
 		// nwait 加一
@@ -174,6 +175,7 @@ func semrelease(addr *uint32) {
 
 func semrelease1(addr *uint32, handoff bool, skipframes int) {
 	root := semroot(addr)
+	// 增加 addr 的值
 	atomic.Xadd(addr, 1)
 
 	// Easy case: no waiters?
@@ -237,6 +239,7 @@ func semrelease1(addr *uint32, handoff bool, skipframes int) {
 }
 
 func semroot(addr *uint32) *semaRoot {
+	// 不用担心 semtable 用完，因为 semaRoot 根据不同的 addr 会查找不同树枝
 	return &semtable[(uintptr(unsafe.Pointer(addr))>>3)%semTabSize].root
 }
 

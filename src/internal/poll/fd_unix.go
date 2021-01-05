@@ -269,6 +269,7 @@ func (fd *FD) Write(p []byte) (int, error) {
 		if fd.IsStream && max-nn > maxRW {
 			max = nn + maxRW
 		}
+		// 默认先写完，假如返回值 n < len(p) 继续循环写
 		n, err := syscall.Write(fd.Sysfd, p[nn:max])
 		if n > 0 {
 			nn += n

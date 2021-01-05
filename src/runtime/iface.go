@@ -31,11 +31,13 @@ func itabHashFunc(inter *interfacetype, typ *_type) uintptr {
 }
 
 func getitab(inter *interfacetype, typ *_type, canfail bool) *itab {
+	// 没有方法
 	if len(inter.mhdr) == 0 {
 		throw("internal error - misuse of itab")
 	}
 
 	// easy case
+	// 没有函数
 	if typ.tflag&tflagUncommon == 0 {
 		if canfail {
 			return nil
@@ -116,6 +118,7 @@ func (t *itabTableType) find(inter *interfacetype, typ *_type) *itab {
 	}
 }
 
+// 把 itab 加入到 itab hash 表中
 // itabAdd adds the given itab to the itab hash table.
 // itabLock must be held.
 func itabAdd(m *itab) {

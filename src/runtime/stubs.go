@@ -229,9 +229,11 @@ func publicationBarrier()
 // immediately and can only be passed to nosplit functions.
 
 //go:noescape
+// 程序计数器
 func getcallerpc() uintptr
 
 //go:noescape
+// 栈指针
 func getcallersp() uintptr // implemented as an intrinsic on all platforms
 
 // getclosureptr returns the pointer to the current closure.

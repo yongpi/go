@@ -230,6 +230,7 @@ type CancelFunc func()
 // Canceling this context releases resources associated with it, so code should
 // call cancel as soon as the operations running in this Context complete.
 func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
+	// 新建一个 cancelCtx
 	c := newCancelCtx(parent)
 	propagateCancel(parent, &c)
 	return &c, func() { c.cancel(true, Canceled) }
@@ -245,11 +246,14 @@ var goroutines int32
 
 // propagateCancel arranges for child to be canceled when parent is.
 func propagateCancel(parent Context, child canceler) {
+	// 假如父 context 无法取消，直接返回，不用监控
+	// 假如父 context 是 cancel ctx 则会初始化父 context 的 done chan
 	done := parent.Done()
 	if done == nil {
 		return // parent is never canceled
 	}
 
+	// 先查一下父 context 是否 cancel
 	select {
 	case <-done:
 		// parent is already canceled
@@ -258,6 +262,7 @@ func propagateCancel(parent Context, child canceler) {
 	default:
 	}
 
+	// 判断父 ctx
 	if p, ok := parentCancelCtx(parent); ok {
 		p.mu.Lock()
 		if p.err != nil {
@@ -293,9 +298,11 @@ var cancelCtxKey int
 // different done channel, in which case we should not bypass it.)
 func parentCancelCtx(parent Context) (*cancelCtx, bool) {
 	done := parent.Done()
+	// 父 ctx 已经被 cancel 或者父 ctx 永远也不会取消
 	if done == closedchan || done == nil {
 		return nil, false
 	}
+
 	p, ok := parent.Value(&cancelCtxKey).(*cancelCtx)
 	if !ok {
 		return nil, false
@@ -329,7 +336,7 @@ type canceler interface {
 	Done() <-chan struct{}
 }
 
-// closedchan is a reusable closed channel.
+// closedchan is a reusable closed channel. 可重用的已经关闭的 channel
 var closedchan = make(chan struct{})
 
 func init() {
@@ -398,6 +405,7 @@ func (c *cancelCtx) cancel(removeFromParent bool, err error) {
 		return // already canceled
 	}
 	c.err = err
+	// 假如 cancel ctx 还没有被当做父 ctx 就被 cancer 了，那么 done 就是 closed chan
 	if c.done == nil {
 		c.done = closedchan
 	} else {
