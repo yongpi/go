@@ -208,6 +208,7 @@ func scavengeSleep(ns int64) int64 {
 func bgscavenge(c chan int) {
 	scavenge.g = getg()
 
+	// 先上线程锁
 	lock(&scavenge.lock)
 	scavenge.parked = true
 
@@ -217,6 +218,7 @@ func bgscavenge(c chan int) {
 	}
 
 	c <- 1
+	// 挂起，等待唤醒
 	goparkunlock(&scavenge.lock, waitReasonGCScavengeWait, traceEvGoBlock, 1)
 
 	// Exponentially-weighted moving average of the fraction of time this

@@ -639,7 +639,7 @@ type p struct {
 	sudogcache []*sudog
 	sudogbuf   [128]*sudog
 
-	// Cache of mspan objects from the heap.
+	// Cache of mspan objects from the heap. mspan 的 cache
 	mspancache struct {
 		// We need an explicit length here because this field is used
 		// in allocation codepaths where write barriers are not allowed,
@@ -667,7 +667,7 @@ type p struct {
 	// Per-P GC state
 	gcAssistTime         int64    // Nanoseconds in assistAlloc
 	gcFractionalMarkTime int64    // Nanoseconds in fractional mark worker (atomic)
-	gcBgMarkWorker       guintptr // (atomic) 后台运行的 g work
+	gcBgMarkWorker       guintptr // (atomic) 后台运行的 gc g work
 	gcMarkWorkerMode     gcMarkWorkerMode
 
 	// gcMarkWorkerStartTime is the nanotime() at which this mark
@@ -682,7 +682,7 @@ type p struct {
 	// wbBuf is this P's GC write barrier buffer.
 	//
 	// TODO: Consider caching this in the running G.
-	wbBuf wbBuf
+	wbBuf wbBuf // 写屏障缓存
 
 	runSafePointFn uint32 // if 1, run sched.safePointFn at next safe point
 

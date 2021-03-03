@@ -1396,6 +1396,7 @@ TEXT runtime·addmoduledata(SB),NOSPLIT,$0-0
 // - AX is the value being written at DI
 // It clobbers FLAGS. It does not clobber any general-purpose registers,
 // but may clobber others (e.g., SSE registers).
+// 写屏障
 TEXT runtime·gcWriteBarrier(SB),NOSPLIT,$120
 	// Save the registers clobbered by the fast path. This is slightly
 	// faster than having the caller spill these.
@@ -1407,7 +1408,7 @@ TEXT runtime·gcWriteBarrier(SB),NOSPLIT,$120
 	MOVQ	g(R13), R13
 	MOVQ	g_m(R13), R13
 	MOVQ	m_p(R13), R13
-	MOVQ	(p_wbBuf+wbBuf_next)(R13), R14
+	MOVQ	(p_wbBuf+wbBuf_next)(R13), R14 // 写到 p 的 wbBuf 中
 	// Increment wbBuf.next position.
 	LEAQ	16(R14), R14
 	MOVQ	R14, (p_wbBuf+wbBuf_next)(R13)
@@ -1462,7 +1463,7 @@ flush:
 	MOVQ	R15, 96(SP)
 
 	// This takes arguments DI and AX
-	CALL	runtime·wbBufFlush(SB)
+	CALL	runtime·wbBufFlush(SB)  // 调用 wbBufFlush 刷新到 p.gcw 中
 
 	MOVQ	0(SP), DI
 	MOVQ	8(SP), AX

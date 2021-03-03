@@ -328,6 +328,8 @@ func doSigPreempt(gp *g, ctxt *sigctxt) {
 	// preempt.
 	if wantAsyncPreempt(gp) && isAsyncSafePoint(gp, ctxt.sigpc(), ctxt.sigsp(), ctxt.siglr()) {
 		// Inject a call to asyncPreempt.
+		// 给当前线程注入一个函数调用
+		// pushCall 就是在执行下一条指令之前插入一个函数
 		ctxt.pushCall(funcPC(asyncPreempt))
 	}
 
@@ -383,11 +385,9 @@ func sigFetchG(c *sigctxt) *g {
 // sigtrampgo is called from the signal handler function, sigtramp,
 // written in assembly code.
 // This is called by the signal handler, and the world may be stopped.
-//
-// It must be nosplit because getg() is still the G that was running
-// (if any) when the signal was delivered, but it's (usually) called
-// on the gsignal stack. Until this switches the G to gsignal, the
-// stack bounds check won't work.
+// 它必须处于未分割状态，因为getg（）仍然是传递信号时正在运行的G（如果有），但是（通常）是在 gsignal 堆栈上调用的。
+// It must be nosplit because getg() is still the G that was running (if any) when the signal was delivered, but it's (usually) called on the gsignal stack.
+// Until this switches the G to gsignal, the stack bounds check won't work.
 //
 //go:nosplit
 //go:nowritebarrierrec
@@ -415,6 +415,7 @@ func sigtrampgo(sig uint32, info *siginfo, ctx unsafe.Pointer) {
 		g.m.gsignal.stktopsp = getcallersp()
 	}
 
+	// 切换到 gsignal 堆栈上
 	setg(g.m.gsignal)
 
 	if g.stackguard0 == stackFork {
@@ -493,7 +494,7 @@ var testSigusr1 func(gp *g) bool
 //
 // The garbage collector may have stopped the world, so write barriers
 // are not allowed.
-//
+// signal_unix.go initsig 会注册这个方法
 //go:nowritebarrierrec
 func sighandler(sig uint32, info *siginfo, ctxt unsafe.Pointer, gp *g) {
 	_g_ := getg()

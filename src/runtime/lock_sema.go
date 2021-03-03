@@ -299,6 +299,7 @@ func notetsleepg(n *note, ns int64) bool {
 		throw("notetsleepg on g0")
 	}
 	semacreate(gp.m)
+	// 进入系统调用 block
 	entersyscallblock()
 	ok := notetsleep_internal(n, ns, nil, 0)
 	exitsyscall()

@@ -369,15 +369,13 @@ type mspan struct {
 
 	// freeindex is the slot index between 0 and nelems at which to begin scanning
 	// for the next free object in this span.
-	// Each allocation scans allocBits starting at freeindex until it encounters a 0
-	// indicating a free object. freeindex is then adjusted so that subsequent scans begin
-	// just past the newly discovered free object.
+	// Each allocation scans allocBits starting at freeindex until it encounters a 0 indicating a free object.
+	// freeindex is then adjusted so that subsequent scans begin just past the newly discovered free object.
 	//
 	// If freeindex == nelem, this span has no free objects.
 	//
 	// allocBits is a bitmap of objects in this span.
-	// If n >= freeindex and allocBits[n/8] & (1<<(n%8)) is 0
-	// then object n is free;
+	// If n >= freeindex and allocBits[n/8] & (1<<(n%8)) is 0 then object n is free;
 	// otherwise, object n is allocated. Bits starting at nelem are
 	// undefined and should never be referenced.
 	//
@@ -1187,6 +1185,7 @@ HaveSpan:
 			s.divShift2 = 0
 			s.baseMask = 0
 		} else {
+			// 确定对象大小和数量
 			s.elemsize = uintptr(class_to_size[sizeclass])
 			s.nelems = nbytes / s.elemsize
 
@@ -1199,6 +1198,7 @@ HaveSpan:
 
 		// Initialize mark and allocation structures.
 		s.freeindex = 0
+		// 位图为 1 << 64
 		s.allocCache = ^uint64(0) // all 1s indicating all free.
 		s.gcmarkBits = newMarkBits(s.nelems)
 		s.allocBits = newAllocBits(s.nelems)
@@ -1238,6 +1238,7 @@ HaveSpan:
 	// related to this span will only every be read or modified by
 	// this thread until pointers into the span are published or
 	// pageInUse is updated.
+
 	// 把 span 放到 arena 里
 	h.setSpans(s.base(), npages, s)
 
@@ -1284,6 +1285,7 @@ func (h *mheap) grow(npage uintptr) bool {
 		// Not enough room in the current arena. Allocate more
 		// arena space. This may not be contiguous with the
 		// current arena, so we have to request the full ask.
+		// 申请内存
 		av, asize := h.sysAlloc(ask)
 		if av == nil {
 			print("runtime: out of memory: cannot allocate ", ask, "-byte block (", memstats.heap_sys, " in use)\n")
@@ -1303,6 +1305,7 @@ func (h *mheap) grow(npage uintptr) bool {
 				totalGrowth += size
 			}
 			// Switch to the new space.
+			// 把新申请的内存地址赋值给 curArena
 			h.curArena.base = uintptr(av)
 			h.curArena.end = uintptr(av) + asize
 		}
@@ -1317,13 +1320,14 @@ func (h *mheap) grow(npage uintptr) bool {
 		mSysStatInc(&memstats.heap_idle, asize)
 
 		// Recalculate nBase
-		// 加上申请的内存
+		// 重新计算 nBase
 		nBase = alignUp(h.curArena.base+ask, physPageSize)
 	}
 
 	// Grow into the current arena.
 	v := h.curArena.base
 	h.curArena.base = nBase
+	// 设置基数树
 	h.pages.grow(v, nBase-v)
 	totalGrowth += nBase - v
 

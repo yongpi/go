@@ -58,6 +58,14 @@ var levelLogPages = [summaryLevels]uint{
 // pageAlloc should be uninitialized except for sysStat if any runtime statistic should be updated.
 func (s *pageAlloc) sysInit() {
 	// Reserve memory for each level. This will get mapped in as R/W by setArenas.
+	// 让咱们来算个账
+	// go heap 最多能表示 1<< heapAddrBits 的内存，也就是 1<< 48 的内存，256TB。
+	// 基数树的每一个 chunk (pallocData) 是长度为 8 的 int64 的数组，每一位表示一个 page，也就是 8*64(1<<9) 的位图，每一个 page 是 8192 (1<< 13)
+	// 所以基数树初始化了 1 << (48-9-13 = 26) 个 chunk 用来表示所有的 page 使用情况。
+	// 而基数树总共五层，最底层（第五层） 1<< 26 个 pallocSum，最底层的每一个子节点的 pallocSum 包含了一个 chunk 的信息，pallocSum 的 max 最多可以表示 1<< 22 个空闲的 page
+	// 基数树每上升一层，对应层的子节点 pallocSum 则包含了 8 * 下层子节点的信息，也就是第四层的子节点 pallocSum 包含了 8*chunk 的信息，也就是 8*64*8(1<< 11) 个 page 的信息
+	// 顺序推导到第一层，第一层的子节点 pallocSum 则包含了 8*64*8*8*8*8 (1<< 21) 个 page 的信息，而 pallocSum 的 max 最多可以表示 1<< 22 个空闲的 page，正好够用。
+	// 第一层的每一个子节点的 pallocSum 包含了 1<< 21 个 page 的信息，page 本身是 8192 ( 1<< 13) 的大小，所以第一层初始化了 1 << 14(48-21-13) 个 pallocSum
 	for l, shift := range levelShift {
 		entries := 1 << (heapAddrBits - shift)
 

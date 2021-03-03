@@ -1065,9 +1065,8 @@ func gostartcallfn(gobuf *gobuf, fv *funcval) {
 	gostartcall(gobuf, fn, unsafe.Pointer(fv))
 }
 
-// isShrinkStackSafe returns whether it's safe to attempt to shrink
-// gp's stack. Shrinking the stack is only safe when we have precise
-// pointer maps for all frames on the stack.
+// isShrinkStackSafe returns whether it's safe to attempt to shrink gp's stack.
+// Shrinking the stack is only safe when we have precise pointer maps for all frames on the stack.
 func isShrinkStackSafe(gp *g) bool {
 	// We can't copy the stack if we're in a syscall.
 	// The syscall might have pointers into the stack and

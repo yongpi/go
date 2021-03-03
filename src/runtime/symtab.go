@@ -336,8 +336,7 @@ var modulesSlice *[]*moduledata // see activeModules
 
 // activeModules returns a slice of active modules.
 //
-// A module is active once its gcdatamask and gcbssmask have been
-// assembled and it is usable by the GC.
+// A module is active once its gcdatamask and gcbssmask have been assembled and it is usable by the GC.
 //
 // This is nosplit/nowritebarrier because it is called by the
 // cgo pointer checking code.

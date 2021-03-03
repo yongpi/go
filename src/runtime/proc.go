@@ -166,6 +166,7 @@ func main() {
 	// Record when the world started.
 	runtimeInitTime = nanotime()
 
+	// 设置后台运行的 GC
 	gcenable()
 
 	main_init_done = make(chan bool)
@@ -583,6 +584,7 @@ func schedinit() {
 	goargs()
 	goenvs()
 	parsedebugvars()
+	// 初始化 gc
 	gcinit()
 
 	sched.lastpoll = uint64(nanotime())
@@ -937,6 +939,7 @@ func startTheWorldGC() {
 	semrelease(&gcsema)
 }
 
+// 拥有 worldsema 的 m 可以有试图停止世界！
 // Holding worldsema grants an M the right to try to stop the world.
 var worldsema uint32 = 1
 
@@ -982,6 +985,7 @@ func stopTheWorldWithSema() {
 	lock(&sched.lock)
 	sched.stopwait = gomaxprocs
 	atomic.Store(&sched.gcwaiting, 1)
+	// 抢占所有的 p， 给 m 发抢占信号
 	preemptall()
 	// stop current P
 	_g_.m.p.ptr().status = _Pgcstop // Pgcstop is only diagnostic.
@@ -1014,6 +1018,7 @@ func stopTheWorldWithSema() {
 	if wait {
 		for {
 			// wait for 100us, then try to re-preempt in case of any races
+			// 被别人唤醒则返回 true， 自己按时醒来就返回 false
 			if notetsleep(&sched.stopnote, 100*1000) {
 				noteclear(&sched.stopnote)
 				break
@@ -1167,7 +1172,7 @@ func mstart1() {
 	// Install signal handlers; after minit so that minit can
 	// prepare the thread to be able to handle the signals.
 	if _g_.m == &m0 {
-		// 启动 m0 ，这里面会注册处理信号的 handler
+		// 启动 m0 ，这里面会为进程注册处理信号的 handler （进程下所有线程共享）
 		mstartm0()
 	}
 
@@ -1300,12 +1305,9 @@ found:
 }
 
 // forEachP calls fn(p) for every P p when p reaches a GC safe point.
-// If a P is currently executing code, this will bring the P to a GC
-// safe point and execute fn on that P. If the P is not executing code
-// (it is idle or in a syscall), this will call fn(p) directly while
-// preventing the P from exiting its state. This does not ensure that
-// fn will run on every CPU executing Go code, but it acts as a global
-// memory barrier. GC uses this as a "ragged barrier."
+// If a P is currently executing code, this will bring the P to a GC safe point and execute fn on that P.
+// If the P is not executing code (it is idle or in a syscall), this will call fn(p) directly while preventing the P from exiting its state.
+// This does not ensure that fn will run on every CPU executing Go code, but it acts as a global memory barrier. GC uses this as a "ragged barrier."
 //
 // The caller must hold worldsema.
 //
@@ -1410,7 +1412,7 @@ func runSafePointFn() {
 	if !atomic.Cas(&p.runSafePointFn, 1, 0) {
 		return
 	}
-	// 执行函数，还没有看到，不知道这个函数啥意思
+	// 执行安全点函数
 	sched.safePointFn(p)
 	lock(&sched.lock)
 	sched.safePointWait--
@@ -2026,7 +2028,7 @@ func handoffp(_p_ *p) {
 		unlock(&sched.lock)
 		return
 	}
-	// 安全点  又是垃圾回收那些事， 还没看呢。。。。。。。。。。。。
+	// 安全点  又是垃圾回收， 还没看呢。。。。。。。。。。。。
 	if _p_.runSafePointFn != 0 && atomic.Cas(&_p_.runSafePointFn, 1, 0) {
 		sched.safePointFn(_p_)
 		sched.safePointWait--
@@ -2363,6 +2365,7 @@ stop:
 	// We have nothing to do. If we're in the GC mark phase, can
 	// safely scan and blacken objects, and have work to do, run
 	// idle-time marking rather than give up the P.
+	// 把 p 中 GC 后台标记专用 G 拿出来
 	if gcBlackenEnabled != 0 && _p_.gcBgMarkWorker != 0 && gcMarkWorkAvailable(_p_) {
 		_p_.gcMarkWorkerMode = gcMarkWorkerIdleMode
 		gp := _p_.gcBgMarkWorker.ptr()
@@ -2913,6 +2916,7 @@ func gopreempt_m(gp *g) {
 	if trace.enabled {
 		traceGoPreempt()
 	}
+	// 重新调度
 	goschedImpl(gp)
 }
 
@@ -3200,6 +3204,7 @@ func entersyscall_gcwait() {
 }
 
 // The same as entersyscall(), but with a hint that the syscall is blocking.
+// 清理 m 和 p 的关系，设置 g 为 syscall 状态，保存 g 的程序计数器和栈指针， 并且保持 m 和 g 的关系
 //go:nosplit
 func entersyscallblock() {
 	_g_ := getg()
@@ -3234,6 +3239,7 @@ func entersyscallblock() {
 		})
 	}
 
+	// 清理 m 和 p 的关系
 	systemstack(entersyscallblock_handoff)
 
 	// Resave for traceback during blocked call.
@@ -3332,11 +3338,10 @@ func exitsyscall() {
 	}
 
 	// Scheduler returned, so we're allowed to run now.
-	// Delete the syscallsp information that we left for
-	// the garbage collector during the system call.
-	// Must wait until now because until gosched returns
-	// we don't know for sure that the garbage collector
-	// is not running.
+	// 删除系统调用期间留给垃圾收集器的 syscallsp 信息
+	// Delete the syscallsp information that we left for the garbage collector during the system call.
+	// 必须等到现在，因为直到 gosched 返回之前，我们不确定垃圾收集器是否在运行。
+	// Must wait until now because until gosched returns we don't know for sure that the garbage collector is not running.
 	_g_.syscallsp = 0
 	_g_.m.p.ptr().syscalltick++
 	_g_.throwsplit = false
@@ -3428,6 +3433,7 @@ func exitsyscall0(gp *g) {
 	_g_ := getg()
 
 	casgstatus(gp, _Gsyscall, _Grunnable)
+	// 删除 gp 和 m 的关系
 	dropg()
 	lock(&sched.lock)
 	var _p_ *p
@@ -3442,6 +3448,7 @@ func exitsyscall0(gp *g) {
 	}
 	unlock(&sched.lock)
 	if _p_ != nil {
+		// 当前 g 是 g0
 		acquirep(_p_)
 		execute(gp, false) // Never returns.
 	}

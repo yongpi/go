@@ -80,8 +80,10 @@ type gcWork struct {
 	// Invariant: Both wbuf1 and wbuf2 are nil or neither are.
 	wbuf1, wbuf2 *workbuf
 
-	// Bytes marked (blackened) on this gcWork. This is aggregated
-	// into work.bytesMarked by dispose.
+	// 在此gcWork上标记（涂黑）的字节
+	// Bytes marked (blackened) on this gcWork.
+	// 这被汇总到work.bytes中，标记为dispose。
+	// This is aggregated into work.bytesMarked by dispose.
 	bytesMarked uint64
 
 	// Scan work performed on this gcWork. This is aggregated into
@@ -114,7 +116,9 @@ type gcWork struct {
 // permanently corrupt the gcWork.
 
 func (w *gcWork) init() {
+	// 获取一个空的 workbuf
 	w.wbuf1 = getempty()
+	// 获取一个满的 workbuf
 	wbuf2 := trygetfull()
 	if wbuf2 == nil {
 		wbuf2 = getempty()
@@ -179,10 +183,12 @@ func (w *gcWork) put(obj uintptr) {
 	flushed := false
 	wbuf := w.wbuf1
 	if wbuf == nil {
+		// 初始化 gcWork
 		w.init()
 		wbuf = w.wbuf1
 		// wbuf is empty at this point.
 	} else if wbuf.nobj == len(wbuf.obj) {
+		// wbuf1 和 wbuf2 互换
 		w.wbuf1, w.wbuf2 = w.wbuf2, w.wbuf1
 		wbuf = w.wbuf1
 		if wbuf.nobj == len(wbuf.obj) {
@@ -197,10 +203,9 @@ func (w *gcWork) put(obj uintptr) {
 	wbuf.obj[wbuf.nobj] = obj
 	wbuf.nobj++
 
-	// If we put a buffer on full, let the GC controller know so
-	// it can encourage more workers to run. We delay this until
-	// the end of put so that w is in a consistent state, since
-	// enlistWorker may itself manipulate w.
+	// 如果缓冲区已满，请告知GC控制器，这样可以鼓励更多的 work 运行
+	// If we put a buffer on full, let the GC controller know so it can encourage more workers to run.
+	// We delay this until the end of put so that w is in a consistent state, since enlistWorker may itself manipulate w.
 	if flushed && gcphase == _GCmark {
 		gcController.enlistWorker()
 	}
@@ -265,6 +270,7 @@ func (w *gcWork) putBatch(obj []uintptr) {
 // If there are no pointers remaining in this gcWork or in the global
 // queue, tryGet returns 0.  Note that there may still be pointers in
 // other gcWork instances or other caches.
+// wbuf1 -> wbuf2 -> work.full
 //go:nowritebarrierrec
 func (w *gcWork) tryGet() uintptr {
 	wbuf := w.wbuf1
@@ -282,6 +288,7 @@ func (w *gcWork) tryGet() uintptr {
 			if wbuf == nil {
 				return 0
 			}
+			// 一点都不浪费， 放到 work 的空队列里去
 			putempty(owbuf)
 			w.wbuf1 = wbuf
 		}
@@ -450,12 +457,14 @@ func getempty() *workbuf {
 		// Slice up the span into new workbufs. Return one and
 		// put the rest on the empty list.
 		for i := uintptr(0); i+_WorkbufSize <= workbufAlloc; i += _WorkbufSize {
+			// 分配一个 workbuf
 			newb := (*workbuf)(unsafe.Pointer(s.base() + i))
 			newb.nobj = 0
 			lfnodeValidate(&newb.node)
 			if i == 0 {
 				b = newb
 			} else {
+				// 放在 work empty 的缓存里
 				putempty(newb)
 			}
 		}
@@ -501,6 +510,7 @@ func handoff(b *workbuf) *workbuf {
 	b1.nobj = n
 	memmove(unsafe.Pointer(&b1.obj[0]), unsafe.Pointer(&b.obj[b.nobj]), uintptr(n)*unsafe.Sizeof(b1.obj[0]))
 
+	// 把 b 的一般放到 full list, 另一半返回
 	// Put b on full list - let first half of b get stolen.
 	putfull(b)
 	return b1

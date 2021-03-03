@@ -346,11 +346,13 @@ func setsig(i uint32, fn uintptr) {
 		}
 	}
 	*(*uintptr)(unsafe.Pointer(&sa.__sigaction_u)) = fn
+	// 所有的线程共享 sigaction
 	sigaction(i, &sa, nil)
 }
 
 // sigtramp is the callback from libc when a signal is received.
 // It is called with the C calling convention.
+// sigtramp 中调用 sigtrampgo
 func sigtramp()
 func cgoSigtramp()
 
@@ -413,5 +415,6 @@ func sysargs(argc int32, argv **byte) {
 }
 
 func signalM(mp *m, sig int) {
+	// 针对线程发送信息，只有对应的线程可以收到并且处理
 	pthread_kill(pthread(mp.procid), uint32(sig))
 }

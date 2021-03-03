@@ -278,6 +278,7 @@ const (
 	// logHeapArenaBytes is log_2 of heapArenaBytes. For clarity,
 	// prefer using heapArenaBytes where possible (we need the
 	// constant to compute some other constants).
+	// 64 位是 26
 	logHeapArenaBytes = (6+20)*(_64bit*(1-sys.GoosWindows)*(1-sys.GoarchWasm)) + (2+20)*(_64bit*sys.GoosWindows) + (2+20)*(1-_64bit) + (2+20)*sys.GoarchWasm
 
 	// heapArenaBitmapBytes is the size of each heap arena's bitmap. 每一个 heap arena 的 bitmap 的大小
@@ -298,7 +299,7 @@ const (
 	// We use the L1 map on 64-bit Windows because the arena size
 	// is small, but the address space is still 48 bits, and
 	// there's a high cost to having a large L2.
-	// 64 位是 1
+
 	arenaL1Bits = 6 * (_64bit * sys.GoosWindows)
 
 	// arenaL2Bits is the number of bits of the arena number
@@ -570,7 +571,7 @@ func mallocinit() {
 		// On AIX, mmaps starts at 0x0A00000000000000 for 64-bit.
 		// processes.
 
-
+		// 申请 128 个 arenaHits
 		for i := 0x7f; i >= 0; i-- {
 			var p uintptr
 			switch {
@@ -693,6 +694,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Try to grow the heap at a hint address.
+	// arenaHints 在初始化的时候赋值了
 	for h.arenaHints != nil {
 		hint := h.arenaHints
 		p := hint.addr
@@ -710,6 +712,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 			// 预留地址
 			v = sysReserve(unsafe.Pointer(p), n)
 		}
+		// 预留地址成功
 		if p == uintptr(v) {
 			// Success. Update the hint.
 			if !hint.down {
@@ -782,6 +785,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Transition from Reserved to Prepared.
+	// 准备好内存
 	sysMap(v, size, &memstats.heap_sys)
 
 mapped:
@@ -803,7 +807,6 @@ mapped:
 			throw("arena already initialized")
 		}
 		var r *heapArena
-		// 分配一个 heapArena
 		r = (*heapArena)(h.heapArenaAlloc.alloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gc_sys))
 		if r == nil {
 			// 分配一个 heapArena 空壳
@@ -1015,6 +1018,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// This G is in debt. Assist the GC to correct
 			// this before allocating. This must happen
 			// before disabling preemption.
+			// 分配多少内存就需要完成多少标记任务
 			gcAssistAlloc(assistG)
 		}
 	}
@@ -1197,6 +1201,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// This may be racing with GC so do it atomically if there can be
 	// a race marking the bit.
 	if gcphase != _GCoff {
+		// 新分配的对象都是黑色
 		gcmarknewobject(uintptr(x), size, scanSize)
 	}
 

@@ -67,6 +67,7 @@ func bgsweep(c chan int) {
 	lock(&sweep.lock)
 	sweep.parked = true
 	c <- 1
+	// 把后台运行的 g 挂起
 	goparkunlock(&sweep.lock, waitReasonGCSweepWait, traceEvGoBlock, 1)
 
 	for {
@@ -90,8 +91,8 @@ func bgsweep(c chan int) {
 	}
 }
 
-// sweepone sweeps some unswept heap span and returns the number of pages returned
-// to the heap, or ^uintptr(0) if there was nothing to sweep.
+// Sweepone 会清除一些未清除的堆范围，并返回返回到堆的页面数；如果没有要清除的内容，则返回^ uintptr（0）。
+// sweepone sweeps some unswept heap span and returns the number of pages returned to the heap, or ^uintptr(0) if there was nothing to sweep.
 func sweepone() uintptr {
 	_g_ := getg()
 	sweepRatio := mheap_.sweepPagesPerByte // For debugging

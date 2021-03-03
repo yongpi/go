@@ -73,9 +73,8 @@ type suspendGState struct {
 	stopped bool
 }
 
-// suspendG suspends goroutine gp at a safe-point and returns the
-// state of the suspended goroutine. The caller gets read access to
-// the goroutine until it calls resumeG.
+// suspendG suspends goroutine gp at a safe-point and returns the state of the suspended goroutine.
+// The caller gets read access to the goroutine until it calls resumeG.
 //
 // It is safe for multiple callers to attempt to suspend the same
 // goroutine at the same time. The goroutine may execute between
@@ -170,8 +169,8 @@ func suspendG(gp *g) suspendGState {
 			// Clear the preemption request. It's safe to
 			// reset the stack guard because we hold the
 			// _Gscan bit and thus own the stack.
-			gp.preemptStop = false
 			gp.preempt = false
+			gp.preemptStop = false
 			gp.stackguard0 = gp.stack.lo + _StackGuard
 
 			// The goroutine was already at a safe-point
@@ -277,6 +276,7 @@ func canPreemptM(mp *m) bool {
 // frame and its parent frame conservatively.
 //
 // asyncPreempt is implemented in assembly.
+// asyncPreempt 中会调用 asyncPreempt2
 func asyncPreempt()
 
 //go:nosplit

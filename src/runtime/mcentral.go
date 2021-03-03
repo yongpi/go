@@ -21,7 +21,7 @@ type mcentral struct {
 	lock      mutex
 	spanclass spanClass
 	nonempty  mSpanList // list of spans with a free object, ie a nonempty free list  具有空闲对象的 span list, 也就是非空的空闲列表
-	empty     mSpanList // list of spans with no free objects (or cached in an mcache) 没有空闲对象的 span list
+	empty     mSpanList // list of spans with no free objects (or cached in an mcache) 没有空闲对象的 span list, 但是其中的对象有可能被 GC 之后变成了有空闲的对象
 
 	// nmalloc is the cumulative count of objects allocated from
 	// this mcentral, assuming all spans in mcaches are
@@ -138,6 +138,8 @@ havespan:
 		// heap_live changed.
 		gcController.revise()
 	}
+
+	// 初始化 span 的定位信息
 	freeByteBase := s.freeindex &^ (64 - 1)
 	whichByte := freeByteBase / 8
 	// Init alloc bits cache.

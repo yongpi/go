@@ -137,8 +137,9 @@ type mstats struct {
 	// Whenever this is updated, call gcController.revise().
 	heap_scan uint64
 
-	// heap_marked is the number of bytes marked by the previous
-	// GC. After mark termination, heap_live == heap_marked, but
+	// heap_marked是前一个 GC 标记的字节数。
+	// heap_marked is the number of bytes marked by the previous GC.
+	// After mark termination, heap_live == heap_marked, but
 	// unlike heap_live, heap_marked does not change until the
 	// next mark termination.
 	heap_marked uint64
@@ -599,7 +600,7 @@ func cachestats() {
 
 // flushmcache flushes the mcache of allp[i].
 //
-// The world must be stopped.
+// The world must be stopped. 必须 STW 才能执行！！！！！！
 //
 //go:nowritebarrier
 func flushmcache(i int) {

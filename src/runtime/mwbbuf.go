@@ -53,8 +53,8 @@ type wbBuf struct {
 	// be updated without write barriers.
 	end uintptr
 
-	// buf stores a series of pointers to execute write barriers
-	// on. This must be a multiple of wbBufEntryPointers because
+	// buf stores a series of pointers to execute write barriers on.
+	// This must be a multiple of wbBufEntryPointers because
 	// the write barrier only checks for overflow once per entry.
 	buf [wbBufEntryPointers * wbBufEntries]uintptr
 
@@ -285,6 +285,7 @@ func wbBufFlush1(_p_ *p) {
 			// path to reduce the rate of flushes?
 			continue
 		}
+		// 扫描标记
 		obj, span, objIndex := findObject(ptr, 0, 0)
 		if obj == 0 {
 			continue
