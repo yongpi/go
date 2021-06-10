@@ -564,8 +564,9 @@ func schedinit() {
 	tracebackinit()
 	moduledataverify()
 
-	// 内存初始化
+	// 栈相关初始化
 	stackinit()
+	// 堆相关初始化
 	mallocinit()
 
 	fastrandinit() // must run before mcommoninit
@@ -3560,8 +3561,7 @@ func malg(stacksize int32) *g {
 		// 设置堆栈保护偏移量
 		newg.stackguard0 = newg.stack.lo + _StackGuard
 		newg.stackguard1 = ^uintptr(0)
-		// Clear the bottom word of the stack. We record g
-		// there on gsignal stack during VDSO on ARM and ARM64.
+		// Clear the bottom word of the stack. We record g there on gsignal stack during VDSO on ARM and ARM64.
 		*(*uintptr)(unsafe.Pointer(newg.stack.lo)) = 0
 	}
 	return newg

@@ -141,6 +141,7 @@ func noescape(p unsafe.Pointer) unsafe.Pointer {
 }
 
 func cgocallback(fn, frame unsafe.Pointer, framesize, ctxt uintptr)
+// 在汇编里 asm.amd64.s， 先执行 g 的任务函数，再执行 goexit, goexit 会执行 goexit1
 func gogo(buf *gobuf)
 func gosave(buf *gobuf)
 

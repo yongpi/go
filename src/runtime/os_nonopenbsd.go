@@ -6,8 +6,7 @@
 
 package runtime
 
-// osStackAlloc performs OS-specific initialization before s is used
-// as stack memory.
+// osStackAlloc performs OS-specific initialization before s is used as stack memory.
 func osStackAlloc(s *mspan) {
 }
 
